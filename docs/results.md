@@ -73,9 +73,33 @@ path in `ManagedRuntimeResolver` is exercised on a clean machine via `qemu-windo
 
 ## U3–U7 — appliance workflow
 
-**Status: U3–U5 implemented and unit-tested; U6 dashboard/tray/splash/autostart, including guarded recovery selection and acknowledgement, implemented and unit-tested. Avalonia.Headless covers dashboard status/progress rendering, tray-menu presence, dashboard close-to-tray/reopen behavior, tray-only initial-window policy, and explicit Stop / Leave-running / Cancel exit decisions. U7 packaging and CI wiring implemented. A tray-only desktop smoke ran without an exception (the expected GUI process remained active until the 8-second harness timeout). Full Windows appliance build/init/persistence/recovery/durability experiments remain pending.**
+**Status: U3–U5 implemented and unit-tested; U6 dashboard/tray/splash/autostart implemented and Avalonia.Headless-tested; U7 packaging, CI wiring, and integration test scaffold implemented. Opt-in `SERPY_RUN_APPLIANCE` integration tests (`ApplianceWorkflowTests.cs`) for AE3 (persistence) and AE5 (durability) are structured, non-parallel, and fail-fast on missing credentials. Full Windows appliance build/init/persistence/recovery/durability experiments remain pending until provisioning is run on this machine or a WHPX-enabled CI runner.**
+
+### Recovery durability hardening (committed 2026-08-22)
+
+| Guard | Fix committed |
+|---|---|
+| Same-path replacement rejected before journal/mutation | `fix(core): reject current image recovery target` (dfe0fef) |
+| Interrupted pre-copy bypass of installed-image validation | `fix(core): resume interrupted recovery swaps safely` (35ba2a6) |
+| Duplicate-image resume inference blocked by source digest | `fix(core): harden appliance provisioning and recovery` (c93d9a1) |
+| `IsCompletedCopyAwaitingJournal` contract clarified | `refactor(core): clarify recovery copy verification` (b5ec1cb) |
+| NSIS `/D=` destination correctly unquoted | `fix(core): harden appliance provisioning and recovery` |
 
 ---
+
+## Definition of Done audit — 2026-08-22
+
+| DoD item | Status |
+|---|---|
+| U1–U7 code complete, Windows-only runtime claim | ✅ Satisfied — all units committed |
+| No shell/CLI/PATH-QEMU/service/helper in operation | ✅ Satisfied — `Serpy.App` + `Serpy.Core` only |
+| Managed QEMU/WHPX real QMP/QGA/serial smoke | ✅ Satisfied — 5/5 verified 2026-08-22 (U2) |
+| Windows workflow: build→init→data→stop→restart→intact | ⏳ Pending — appliance not provisioned; opt-in tests written |
+| Unclean-kill and replace-and-recover recorded | ⏳ Pending — requires provisioned appliance |
+| Physical `data.img` boundary (datadir/sites/encryption\_key) | ⏳ Pending — requires provisioned appliance |
+| GUI/tray/autostart/exit AE7+AE8 | ✅ Satisfied — 47 Avalonia.Headless tests pass |
+| README + results.md correct and honest | ✅ Satisfied — this file |
+
 
 ## Guest version report
 
