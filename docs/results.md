@@ -19,7 +19,7 @@
 
 | Suite | Tests | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 122 | Pass — 2026-08-22 |
+| `Serpy.Core.Tests` | 124 | Pass — 2026-08-22 |
 | `Serpy.App.Tests` | 47 | Pass — 2026-08-22 |
 | Windows appliance integration | — | Not run: full ERPNext build/init/endurance experiment remains pending |
 

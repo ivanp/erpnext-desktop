@@ -16,7 +16,7 @@ Two-disk model:
 U1–U5 are complete. U6 dashboard/tray/splash/autostart wiring and U7 packaging/CI wiring are implemented and deterministic-unit-tested. Windows appliance build, initialization, persistence, recovery, and durability experiments remain pending. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
 
 - U2 managed QEMU/WHPX mTLS QMP smoke: **VERIFIED** (5/5) on Windows 11 x64, QEMU 11.1.0 (Stefan Weil).
-- Deterministic tests: `Serpy.Core.Tests` 122 pass, `Serpy.App.Tests` 47 pass.
+- Deterministic tests: `Serpy.Core.Tests` 124 pass, `Serpy.App.Tests` 47 pass.
 
 ## Prerequisites (Windows)
 
