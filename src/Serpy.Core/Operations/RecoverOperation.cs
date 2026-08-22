@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
@@ -325,11 +327,17 @@ public sealed class RecoverOperation(
         !systemImageExists && backupImageExists;
 
     public static bool IsCurrentSystemImageReplacement(
-        string currentSystemImagePath, string replacementImagePath) =>
-        string.Equals(
-            ResolveReparsePointAliases(currentSystemImagePath),
-            ResolveReparsePointAliases(replacementImagePath),
-            StringComparison.OrdinalIgnoreCase);
+        string currentSystemImagePath, string replacementImagePath)
+    {
+        var current = ResolveReparsePointAliases(currentSystemImagePath);
+        var replacement = ResolveReparsePointAliases(replacementImagePath);
+        if (string.Equals(current, replacement, StringComparison.OrdinalIgnoreCase)) return true;
+
+        // A hard link has a distinct pathname but the same NTFS file identity.
+        // Both paths exist here only when the caller's preflight has succeeded.
+        return OperatingSystem.IsWindows() && File.Exists(current) && File.Exists(replacement) &&
+            HaveSameWindowsFileIdentity(current, replacement);
+    }
 
     private static string ResolveReparsePointAliases(string path)
     {
@@ -366,6 +374,46 @@ public sealed class RecoverOperation(
 
         return Path.GetFullPath(resolved);
     }
+
+    private static bool HaveSameWindowsFileIdentity(string firstPath, string secondPath)
+    {
+        var first = GetWindowsFileIdentity(firstPath);
+        var second = GetWindowsFileIdentity(secondPath);
+        return first.VolumeSerialNumber == second.VolumeSerialNumber &&
+            first.FileIndexHigh == second.FileIndexHigh &&
+            first.FileIndexLow == second.FileIndexLow;
+    }
+
+    private static WindowsFileIdentity GetWindowsFileIdentity(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        if (!GetFileInformationByHandle(stream.SafeFileHandle, out var identity))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"Could not determine file identity for recovery image: {path}");
+        return identity;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsFileIdentity
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        Microsoft.Win32.SafeHandles.SafeFileHandle file,
+        out WindowsFileIdentity fileInformation);
 
     public static bool IsCompletedCopyAwaitingJournal(
         bool currentMatchesReplacement, string originalImageSha256,

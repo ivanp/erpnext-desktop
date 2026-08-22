@@ -252,6 +252,35 @@ public sealed class RecoverySwapStateTests
     }
 
     [Fact]
+    public void HardLinkAliasToCurrentSystemImage_IsRejectedAsRecoveryReplacement()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"SerpyRecoverHardLink-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var systemImage = Path.Combine(directory, "system.qcow2");
+            var replacement = Path.Combine(directory, "replacement.qcow2");
+            File.WriteAllText(systemImage, "accepted image");
+
+            using var hardLink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /H \"{replacement}\" \"{systemImage}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            hardLink!.WaitForExit();
+            Assert.Equal(0, hardLink.ExitCode);
+
+            Assert.True(RecoverOperation.IsCurrentSystemImageReplacement(systemImage, replacement));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void JournalledSwapWithSystemMissing_BypassesInstalledImageValidation()
     {
         Assert.True(RecoverOperation.IsInterruptedSwapAwaitingCopy(
