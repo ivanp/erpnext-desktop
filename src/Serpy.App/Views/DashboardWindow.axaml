@@ -1,0 +1,49 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Serpy.App.ViewModels"
+        x:Class="Serpy.App.Views.DashboardWindow"
+        x:DataType="vm:DashboardViewModel"
+        Title="Serpy"
+        Width="500" Height="380"
+        MinWidth="420" MinHeight="300"
+        WindowStartupLocation="CenterScreen">
+
+  <DockPanel Margin="20">
+
+    <!-- Header row: brand + status badge -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+      <TextBlock Text="Serpy" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
+      <Border Background="#EEF1F4" CornerRadius="12" Padding="10,5">
+        <TextBlock Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
+      </Border>
+    </StackPanel>
+
+    <!-- Stage text + determinate progress bar -->
+    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,16">
+      <TextBlock Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
+      <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
+    </StackPanel>
+
+    <!-- Primary action label (read-only in U1; becomes a button in U6) -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding PrimaryActionLabel}"
+               FontSize="13" Foreground="#9AA3AD"
+               Margin="0,0,0,16"/>
+
+    <!-- Show details disclosure (default: collapsed) -->
+    <Expander DockPanel.Dock="Bottom"
+              Header="Show details"
+              IsExpanded="{Binding ShowDetails}"
+              Margin="0,8,0,0">
+      <ScrollViewer MaxHeight="160">
+        <TextBlock Text="{Binding DetailLog}"
+                   FontFamily="Cascadia Code,Consolas,monospace"
+                   FontSize="11"
+                   TextWrapping="Wrap"
+                   Padding="10"/>
+      </ScrollViewer>
+    </Expander>
+
+    <Grid/>
+  </DockPanel>
+</Window>

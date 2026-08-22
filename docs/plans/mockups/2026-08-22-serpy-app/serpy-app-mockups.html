@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Serpy.App — wireframe mockups</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1a1d21;
+    --muted: #6b7280;
+    --line: #e3e6ea;
+    --brand: #2f6f4f;       /* serpy green */
+    --brand-ink: #1c4a34;
+    --ok: #2e9e5b;
+    --warn: #c98a1b;
+    --bad: #c2402f;
+    --idle: #9aa3ad;
+    --accent: #2563eb;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.06);
+    font-synthesis: none;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
+    line-height: 1.45;
+  }
+  header.page {
+    padding: 28px 32px 8px; max-width: 1180px; margin: 0 auto;
+  }
+  header.page h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.01em; }
+  header.page p { margin: 0; color: var(--muted); font-size: 14px; }
+  .grid {
+    max-width: 1180px; margin: 0 auto; padding: 16px 32px 56px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px;
+  }
+  .cell > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .cell > .note { font-size: 12.5px; color: var(--muted); margin: 8px 2px 0; }
+
+  /* ---- window chrome ---- */
+  .win {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .titlebar {
+    height: 34px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: #fbfbfc; border-bottom: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #f0655a; } .dot.y { background: #f2bd4d; } .dot.g { background: #64c56d; }
+  .titlebar .title { margin-left: 6px; font-weight: 600; color: var(--ink); }
+  .titlebar .spacer { flex: 1; }
+  .logo {
+    display: inline-flex; align-items: center; gap: 8px; font-weight: 700;
+    color: var(--brand-ink);
+  }
+  .logo .mark {
+    width: 20px; height: 20px; border-radius: 6px; background: var(--brand);
+    color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800;
+  }
+
+  .body { padding: 18px 20px 20px; }
+
+  /* ---- status hero ---- */
+  .hero { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+    border-radius: 999px; font-weight: 600; font-size: 13px;
+  }
+  .badge .led { width: 10px; height: 10px; border-radius: 50%; }
+  .badge.ok  { background: #e7f6ec; color: #1c6b3a; } .badge.ok .led { background: var(--ok); }
+  .badge.work{ background: #fdf3e0; color: #8a5d12; } .badge.work .led { background: var(--warn); animation: pulse 1.2s infinite; }
+  .badge.idle{ background: #eef1f4; color: #55606b; } .badge.idle .led { background: var(--idle); }
+  .badge.bad { background: #fbecea; color: #922a1e; } .badge.bad .led { background: var(--bad); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .hero .url { margin-left: auto; font-size: 13px; }
+  .hero .url a { color: var(--accent); text-decoration: none; }
+  .hero .url.disabled { color: var(--muted); }
+
+  .sub { color: var(--muted); font-size: 13px; margin: -6px 0 16px; }
+
+  /* ---- primary action row ---- */
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight: 600;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.ghost { background: #fff; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .btn .k { font-size: 15px; line-height: 1; }
+
+  /* ---- progress ---- */
+  .progress-wrap { margin: 14px 0 4px; }
+  .stage { font-size: 13.5px; font-weight: 600; margin-bottom: 8px; display:flex; gap:8px; align-items:center; }
+  .stage .count { color: var(--muted); font-weight: 500; }
+  .bar { height: 10px; border-radius: 999px; background: #eef1f4; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: linear-gradient(90deg,var(--brand),#3f9268); border-radius: 999px; }
+  .bar.indet > span { width: 40%; animation: slide 1.3s infinite ease-in-out; }
+  @keyframes slide { 0%{margin-left:-40%} 100%{margin-left:100%} }
+
+  /* ---- checklist ---- */
+  .checks { list-style: none; margin: 14px 0 0; padding: 0; font-size: 13.5px; }
+  .checks li { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  .checks .ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #fff; flex: none; }
+  .ic.ok { background: var(--ok); } .ic.work { background: var(--warn); } .ic.todo { background: #cdd3da; color: #6b7280; } .ic.bad { background: var(--bad); }
+  .checks li .lbl { flex: 1; }
+  .checks li.pending .lbl { color: var(--muted); }
+
+  /* ---- details disclosure ---- */
+  .details {
+    margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 12px;
+  }
+  .details summary {
+    cursor: pointer; font-size: 12.5px; color: var(--accent); font-weight: 600;
+    list-style: none; user-select: none;
+  }
+  .details summary::-webkit-details-marker { display: none; }
+  .log {
+    margin-top: 10px; background: #10151b; color: #cbd5e1; border-radius: 8px;
+    padding: 10px 12px; font-family: "Cascadia Code", ui-monospace, Menlo, monospace;
+    font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; max-height: 150px; overflow: auto;
+  }
+  .log .mut { color: #7c8794; } .log .g { color: #7fd39b; } .log .y { color: #e6c15a; }
+
+  /* ---- error banner ---- */
+  .banner {
+    display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 8px;
+    background: #fbecea; border: 1px solid #f2c9c2; margin-bottom: 14px;
+  }
+  .banner .bic { width: 22px; height: 22px; border-radius: 50%; background: var(--bad); color: #fff; display: grid; place-items: center; font-weight: 800; flex: none; }
+  .banner h4 { margin: 0 0 2px; font-size: 13.5px; color: #922a1e; }
+  .banner p { margin: 0; font-size: 12.5px; color: #7a2c22; }
+  .banner .fix { margin-top: 6px; }
+  .banner a { color: var(--accent); }
+
+  /* ---- first-run ---- */
+  .steps { counter-reset: s; list-style: none; margin: 6px 0 0; padding: 0; }
+  .steps li { position: relative; padding: 10px 0 10px 40px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .steps li:last-child { border-bottom: 0; }
+  .steps li::before {
+    counter-increment: s; content: counter(s); position: absolute; left: 0; top: 9px;
+    width: 26px; height: 26px; border-radius: 50%; background: #eef1f4; color: var(--muted);
+    display: grid; place-items: center; font-weight: 700; font-size: 12px;
+  }
+  .steps li.active::before { background: var(--brand); color: #fff; }
+  .steps li.done::before { content: "✓"; background: var(--ok); color: #fff; }
+  .steps li small { color: var(--muted); display: block; }
+
+  /* ---- splash ---- */
+  .splash-stage { background: #0f1a14; padding: 30px; border-radius: var(--radius); display: grid; place-items: center; }
+  .splash {
+    width: 340px; background: #fff; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    padding: 26px 26px 22px; text-align: center;
+  }
+  .splash .mark {
+    width: 52px; height: 52px; border-radius: 14px; background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-size: 26px; font-weight: 800; margin: 0 auto 14px;
+  }
+  .splash h3 { margin: 0; font-size: 18px; }
+  .splash .tag { color: var(--muted); font-size: 12.5px; margin: 2px 0 18px; }
+  .splash .stage { justify-content: center; }
+
+  /* ---- tray ---- */
+  .tray-stage { background: linear-gradient(160deg,#1b2430,#0f151d); padding: 24px; border-radius: var(--radius); position: relative; min-height: 260px; }
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: rgba(255,255,255,.06); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 16px; }
+  .tray-icons { display: flex; gap: 12px; align-items: center; color: #cbd5e1; font-size: 12px; }
+  .tray-icons .mark { width: 18px; height: 18px; border-radius: 5px; background: var(--brand); color:#fff; display:grid; place-items:center; font-size:10px; font-weight:800; outline: 2px solid rgba(255,255,255,.5); outline-offset: 1px; }
+  .clock { color:#cbd5e1; font-size:12px; }
+  .menu {
+    position: absolute; right: 16px; bottom: 52px; width: 230px; background: #fff;
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4); overflow: hidden; font-size: 13px;
+  }
+  .menu .head { padding: 10px 14px; border-bottom: 1px solid var(--line); display:flex; align-items:center; gap:8px; }
+  .menu .head .led { width:9px;height:9px;border-radius:50%;background:var(--ok); }
+  .menu .head b { font-size: 12.5px; }
+  .menu .head small { color: var(--muted); display:block; font-size:11px; }
+  .menu ul { list-style: none; margin: 0; padding: 6px 0; }
+  .menu li { padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: default; }
+  .menu li:hover { background: #f1f5f9; }
+  .menu li.dis { color: var(--muted); }
+  .menu li.sep { padding: 0; margin: 6px 0; border-top: 1px solid var(--line); }
+  .menu li .k { width: 16px; text-align:center; }
+  .caret { position:absolute; right: 34px; bottom: 44px; width:12px;height:12px;background:#fff;transform:rotate(45deg); box-shadow: 3px 3px 6px rgba(0,0,0,.1); }
+
+  .legend { max-width:1180px; margin: 0 auto; padding: 0 32px 48px; color: var(--muted); font-size: 12.5px; }
+  .legend code { background:#eef1f4; padding:1px 5px; border-radius:4px; color:#334; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>Serpy.App — wireframe mockups</h1>
+  <p>Windows-first Avalonia GUI. Plain by default, details on demand. States below map 1:1 to the plan's <code>ApplianceStatus</code> (readiness × health), R17/AE8, and U6.</p>
+</header>
+
+<div class="grid">
+
+  <!-- 1. IDLE / initialized-stopped -->
+  <section class="cell">
+    <h2>1 · Dashboard — Ready (Initialized, Stopped)</h2>
+    <div class="win">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">Serpy</span><span class="spacer"></span><span>▁ ▢ ✕</span></div>
+      <div class="body">
+        <div class="hero">
+          <span class="logo"><span class="mark">S</span>Serpy</span>
+          <span class="badge idle"><span class="led"></span>Stopped</span>
+          <span class="url disabled">ERPNext offline</span>
+        </div>
+        <p class="sub">Appliance is built and initialized. Press Start to launch ERPNext.</p>
+        <div class="actions">
+          <button class="btn primary"><span class="k">▶</span>Start</button>
+          <button class="btn ghost" disabled><span class="k">↻</span>Restart</button>
+          <button class="btn ghost" disabled><span class="k">■</span>Stop</button>
+          <button class="btn ghost"><span class="k">⤓</span>Recover…</button>
+        </div>
+        <details class="details">
+          <summary>Show details</summary>
+          <div class="log"><span class="mut"># collapsed by default — logs, ports, versions appear here</span></div>
+        </details>
+      </div>
+    </div>
+    <p class="note">Only valid actions are enabled (Start). Restart/Stop disabled from typed status, never button history.</p>
+  </section>
+
+  <!-- 2. BUILDING / working -->
+  <section class="cell">
+    <h2>2 · Dashboard — Working (Build in progress)</h2>
+    <div class="win">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">Serpy</span><span class="spacer"></span><span>▁ ▢ ✕</span></div>
+      <div class="body">
+        <div class="hero">
+          <span class="logo"><span class="mark">S</span>Serpy</span>
+          <span class="badge work"><span class="led"></span>Building…</span>
+          <span class="url disabled">provisioning</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="stage">Installing ERPNext v16 stack <span class="count">· step 4 of 6</span></div>
+          <div class="bar"><span style="width:62%"></span></div>
+        </div>
+        <ul class="checks">
+          <li><span class="ic ok">✓</span><span class="lbl">Debian image verified</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Runtime versions locked (Python 3.14, Node 24)</span></li>
+          <li><span class="ic work">•</span><span class="lbl">Building bench assets</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Version gate</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Finalize system.qcow2</span></li>
+        </ul>
+        <div class="actions" style="margin-top:16px">
+          <button class="btn ghost"><span class="k">✕</span>Cancel</button>
+        </div>
+        <details class="details">
+          <summary>Show details</summary>
+          <div class="log"><span class="mut">[build] serial sentinel armed</span>
+<span class="g">[qga] python3.14 --version → 3.14.1 OK</span>
+<span class="g">[qga] node --version → v24.2.0 OK</span>
+[bench] building assets… <span class="y">yarn production</span></div>
+        </details>
+      </div>
+    </div>
+    <p class="note">Determinate bar where step count is known; plain stage label leads, technical log stays hidden.</p>
+  </section>
+
+  <!-- 3. RUNNING / healthy -->
+  <section class="cell">
+    <h2>3 · Dashboard — Running (Healthy)</h2>
+    <div class="win">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">Serpy</span><span class="spacer"></span><span>▁ ▢ ✕</span></div>
+      <div class="body">
+        <div class="hero">
+          <span class="logo"><span class="mark">S</span>Serpy</span>
+          <span class="badge ok"><span class="led"></span>Running</span>
+          <span class="url"><a href="#">http://127.0.0.1:18080 ↗</a></span>
+        </div>
+        <p class="sub">ERPNext is healthy. The browser opened automatically.</p>
+        <div class="actions">
+          <button class="btn primary"><span class="k">↗</span>Open ERPNext</button>
+          <button class="btn ghost"><span class="k">↻</span>Restart</button>
+          <button class="btn ghost"><span class="k">■</span>Stop</button>
+        </div>
+        <ul class="checks" style="margin-top:14px">
+          <li><span class="ic ok">✓</span><span class="lbl">Web reachable on 127.0.0.1:18080</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Scheduler &amp; workers running</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Authenticated data check passed</span></li>
+        </ul>
+        <details class="details">
+          <summary>Show details</summary>
+          <div class="log"><span class="mut">pid 20488 · qmp 127.0.0.1:51843 · qga 127.0.0.1:51844</span>
+frappe 16.23.0 · erpnext 16.12.0 · mariadb 11.8.3</div>
+        </details>
+      </div>
+    </div>
+    <p class="note">Green = all checks pass. Open ERPNext appears only when healthy; auto-open fired once on this start.</p>
+  </section>
+
+  <!-- 4. ERROR / prerequisite -->
+  <section class="cell">
+    <h2>4 · Dashboard — Blocked (WHPX prerequisite)</h2>
+    <div class="win">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">Serpy</span><span class="spacer"></span><span>▁ ▢ ✕</span></div>
+      <div class="body">
+        <div class="hero">
+          <span class="logo"><span class="mark">S</span>Serpy</span>
+          <span class="badge bad"><span class="led"></span>Can't start</span>
+          <span class="url disabled">not running</span>
+        </div>
+        <div class="banner">
+          <span class="bic">!</span>
+          <div>
+            <h4>Windows virtualization (WHPX) is turned off</h4>
+            <p>Serpy needs the Windows Hypervisor Platform feature to run the appliance. Turn it on, then restart your PC.</p>
+            <p class="fix"><a href="#">How to enable it ↗</a> &nbsp;·&nbsp; <a href="#">Recheck</a></p>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" disabled><span class="k">▶</span>Start</button>
+        </div>
+        <details class="details">
+          <summary>Show details</summary>
+          <div class="log"><span class="y">[accel] -accel whpx -machine none → WHPX: not present</span>
+<span class="mut">refusing TCG fallback (too slow for ERPNext)</span></div>
+        </details>
+      </div>
+    </div>
+    <p class="note">Plain-language cause + fix + recheck. No stack trace up front. Never falls back to TCG silently.</p>
+  </section>
+
+  <!-- 5. FIRST RUN / not built -->
+  <section class="cell">
+    <h2>5 · First run (Not built) — guided setup</h2>
+    <div class="win">
+      <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">Serpy — Welcome</span><span class="spacer"></span><span>▁ ▢ ✕</span></div>
+      <div class="body">
+        <div class="hero">
+          <span class="logo"><span class="mark">S</span>Serpy</span>
+          <span class="badge idle"><span class="led"></span>Not set up</span>
+        </div>
+        <p class="sub">First time here. Serpy will build the appliance once, then you can start it anytime. This takes ~30–60 min and needs internet.</p>
+        <ol class="steps">
+          <li class="active">Build the appliance<small>Download &amp; provision the ERPNext image</small></li>
+          <li>Initialize your data<small>Create the persistent data disk &amp; first site</small></li>
+          <li>Start &amp; open ERPNext<small>Launch and sign in</small></li>
+        </ol>
+        <div class="actions" style="margin-top:16px">
+          <button class="btn primary"><span class="k">▶</span>Build appliance</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">Turns the 3-verb sequence (build → init → start) into a legible one-way path; only the next valid step is primary.</p>
+  </section>
+
+  <!-- 6. SPLASH -->
+  <section class="cell">
+    <h2>6 · Start splash (always-on-top)</h2>
+    <div class="splash-stage">
+      <div class="splash">
+        <div class="mark">S</div>
+        <h3>Serpy</h3>
+        <div class="tag">powered by ERPNext</div>
+        <div class="progress-wrap">
+          <div class="stage">Starting the appliance…</div>
+          <div class="bar indet"><span></span></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Small, centered, brand-first. Bound to the same OperationUpdate stream; dismisses on terminal state, then the browser opens if healthy.</p>
+  </section>
+
+  <!-- 7. TRAY MENU -->
+  <section class="cell">
+    <h2>7 · Tray right-click menu (Running)</h2>
+    <div class="tray-stage">
+      <div class="menu">
+        <div class="head"><span class="led"></span><div><b>Serpy — Running</b><small>127.0.0.1:18080</small></div></div>
+        <ul>
+          <li><span class="k">🗔</span>Show Dashboard</li>
+          <li><span class="k">↗</span>Open ERPNext</li>
+          <li class="sep"></li>
+          <li class="dis"><span class="k">▶</span>Start</li>
+          <li><span class="k">↻</span>Restart</li>
+          <li><span class="k">■</span>Stop</li>
+          <li class="sep"></li>
+          <li><span class="k">⏻</span>Exit…</li>
+        </ul>
+      </div>
+      <div class="caret"></div>
+      <div class="taskbar">
+        <div class="tray-icons"><span>▲</span><span class="mark">S</span><span>🔊</span><span>🔋</span></div>
+        <span class="clock">2:14 PM</span>
+      </div>
+    </div>
+    <p class="note">Start disabled while running; Stop/Restart/Open enabled. Exit is "…" because it prompts stop-or-leave-running when the VM is live.</p>
+  </section>
+
+</div>
+
+<div class="legend">
+  <p><b>State → surface map.</b> Badge color encodes health: <code>idle</code> grey (Stopped/Not-built), <code>work</code> amber (operation running), <code>ok</code> green (Running+healthy), <code>bad</code> red (Crashed / RunningUnhealthy / blocked). Readiness (<code>NotBuilt / Built / Initialized</code>) drives which primary action is offered. Every technical string lives under <b>Show details</b>, off by default (R17).</p>
+</div>
+</body>
+</html>

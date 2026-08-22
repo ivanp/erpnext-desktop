@@ -1,0 +1,112 @@
+#cloud-config
+# Serpy appliance provisioning — site-less system image build.
+# Installs all runtime (MariaDB, Redis, Python, Node, QGA, Bench, Frappe, ERPNext).
+# Does NOT create a site or initialize the MariaDB datadir (KD4).
+# All versions must match config/versions.yaml exact locks.
+
+apt:
+  sources:
+    mariadb:
+      source: "deb https://downloads.mariadb.com/MariaDB/mariadb-11.8/repo/debian $RELEASE main"
+      key: |
+        # MariaDB signing key — fetched inline by cloud-init
+      keyid: "177F4010FE56CA3336300305F1656F24C74CD1D8"
+
+packages:
+  - curl
+  - git
+  - redis-server
+  - mariadb-server
+  - qemu-guest-agent
+  - nginx
+  - supervisor
+  - python3-dev
+  - python3-pip
+  - python3-venv
+  - build-essential
+  - libssl-dev
+  - libffi-dev
+  - libmysqlclient-dev
+  - libxml2-dev
+  - libxslt-dev
+  - libjpeg-dev
+  - zlib1g-dev
+  - libcairo2-dev
+
+package_update: true
+package_upgrade: true
+
+runcmd:
+  # Install pinned Python 3.14 from deadsnakes
+  - add-apt-repository -y ppa:deadsnakes/ppa
+  - apt-get update -q
+  - apt-get install -y python3.14 python3.14-dev python3.14-venv
+  - update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 100
+
+  # Install pinned Node 24 via NodeSource
+  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  - apt-get install -y nodejs
+
+  # Install Bench
+  - pip3 install frappe-bench==5.x
+
+  # Create frappe user
+  - useradd -m -s /bin/bash frappe
+
+  # Initialize bench as frappe user
+  - su - frappe -c "bench init --frappe-branch version-16 --python python3.14 /home/frappe/frappe-bench"
+
+  # Install ERPNext
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch version-16"
+
+  # Build production assets
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench build --production"
+
+  # Configure production nginx
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench setup nginx"
+  - cp /home/frappe/frappe-bench/config/nginx.conf /etc/nginx/conf.d/frappe.conf
+  - nginx -t
+
+  # Configure supervisor
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench setup supervisor"
+  - cp /home/frappe/frappe-bench/config/supervisor.conf /etc/supervisor/conf.d/frappe.conf
+  - supervisorctl reread && supervisorctl update
+
+  # Install guest helpers
+  - install -m 0755 /var/lib/cloud/instance/scripts/provision-done.sh /usr/local/bin/provision-done.sh
+  - install -m 0755 /var/lib/cloud/instance/scripts/init-data.sh /usr/local/bin/init-data.sh
+  - install -m 0755 /var/lib/cloud/instance/scripts/recover.sh /usr/local/bin/recover.sh
+
+  # Configure systemd ordering: MariaDB and Frappe must not start without /data
+  - systemctl daemon-reload
+
+  # Signal provisioning complete on serial (KTD9)
+  - /usr/local/bin/provision-done.sh
+
+write_files:
+  - path: /var/lib/cloud/instance/scripts/provision-done.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Emit provision-done sentinel on ttyS0 (serial console).
+      # The .NET host reads this via the authenticated serial channel (KTD9).
+      echo 'SERPY_PROVISION_DONE' > /dev/ttyS0
+
+  - path: /etc/systemd/system/mariadb-data-guard.service
+    content: |
+      [Unit]
+      Description=Guard: require /data before MariaDB
+      Before=mariadb.service
+      ConditionPathIsMountPoint=/data
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/true
+      RemainAfterExit=yes
+
+      [Install]
+      RequiredBy=mariadb.service
+
+power_state:
+  mode: poweroff
+  condition: true

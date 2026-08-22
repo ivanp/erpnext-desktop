@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Serpy.App/Serpy.App.csproj" />
+    <Project Path="src/Serpy.Core/Serpy.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Serpy.App.Tests/Serpy.App.Tests.csproj" />
+    <Project Path="tests/Serpy.Core.Tests/Serpy.Core.Tests.csproj" />
+    <Project Path="tests/Serpy.Windows.IntegrationTests/Serpy.Windows.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

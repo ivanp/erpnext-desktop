@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <PublishAot>false</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Audit direct deps only: transitive vulnerabilities (e.g. Avalonia's Tmds.DBus.Protocol)
+         are outside our control and surfacing them as errors blocks CI on unowned code. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+</Project>

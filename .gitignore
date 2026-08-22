@@ -1,0 +1,21 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# Core / App runtime data during local test
+.serpy/
+appliance/
+data/
+
+# Publish output
+publish/
+dist/
+__ce-goal-prompt*

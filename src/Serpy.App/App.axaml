@@ -1,0 +1,50 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Serpy.App.ViewModels"
+             x:Class="Serpy.App.App"
+             RequestedThemeVariant="Default">
+
+  <TrayIcon.Icons>
+    <TrayIcons>
+      <!-- x:DataType enables compiled bindings; DataContext is DashboardViewModel (set in code-behind) -->
+      <TrayIcon x:DataType="vm:DashboardViewModel"
+                Icon="/Assets/serpy.ico"
+                ToolTipText="Serpy"
+                Command="{Binding ShowDashboardCommand}">
+        <TrayIcon.Menu>
+          <NativeMenu>
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Show Dashboard"
+                            Command="{Binding ShowDashboardCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Start"
+                            Command="{Binding StartCommand}"
+                            IsEnabled="{Binding CanStart}" />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Restart"
+                            Command="{Binding RestartCommand}"
+                            IsEnabled="{Binding CanRestart}" />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Stop"
+                            Command="{Binding StopCommand}"
+                            IsEnabled="{Binding CanStop}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Open ERPNext"
+                            Command="{Binding OpenErpNextCommand}"
+                            IsEnabled="{Binding IsHealthy}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Exit…"
+                            Command="{Binding ExitCommand}" />
+          </NativeMenu>
+        </TrayIcon.Menu>
+      </TrayIcon>
+    </TrayIcons>
+  </TrayIcon.Icons>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+</Application>

@@ -1,0 +1,219 @@
+name: QEMU Windows Build + mTLS Smoke
+
+# ─── Runner requirement ────────────────────────────────────────────────────────
+# The mTLS QMP smoke uses -accel whpx, which requires Windows Hypervisor Platform
+# enabled on a bare-metal or hardware-passthrough-capable Windows x64 machine.
+# GitHub-hosted `windows-latest` runners are nested VMs and do NOT expose WHPX.
+# Set up a self-hosted runner on a WHPX-enabled Windows 11 x64 machine:
+#   1. Enable Windows Hypervisor Platform in Windows Features → reboot.
+#   2. Install .NET 10 SDK, MSYS2, and the Actions runner agent.
+#   3. Register the runner with label `whpx-windows` in your repo settings.
+# Without that runner this workflow will queue indefinitely and never execute.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    paths:
+      - 'eng/qemu/build-windows.ps1'
+      - 'config/versions.yaml'
+      - 'src/Serpy.Core/Qemu/**'
+      - 'src/Serpy.Core/Protocols/**'
+      - 'tests/Serpy.Windows.IntegrationTests/**'
+  workflow_dispatch:
+
+# QEMU build is slow (~30 min); runs only on relevant path changes and manual dispatch.
+
+jobs:
+  build-qemu-and-smoke:
+    name: Build QEMU + mTLS QMP smoke
+    # MUST run on a self-hosted bare-metal/passthrough Windows x64 machine with
+    # Windows Hypervisor Platform already enabled and a reboot completed.
+    # See runner setup instructions at the top of this file.
+    runs-on: [self-hosted, whpx-windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gnutls
+            mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-zlib
+            git
+            make
+
+      - name: Read QEMU version from manifest
+        id: qemu-ver
+        shell: pwsh
+        run: |
+          $yaml = Get-Content config/versions.yaml -Raw
+          $m = [regex]::Match($yaml, 'version:\s*"([^"]+)"')
+          echo "version=$($m.Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Cache QEMU source
+        uses: actions/cache@v4
+        id: cache-qemu-src
+        with:
+          path: qemu-${{ steps.qemu-ver.outputs.version }}.tar.xz
+          key: qemu-src-${{ steps.qemu-ver.outputs.version }}
+
+      - name: Download QEMU source
+        if: steps.cache-qemu-src.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.qemu-ver.outputs.version }}"
+          Invoke-WebRequest "https://download.qemu.org/qemu-$ver.tar.xz" -OutFile "qemu-$ver.tar.xz"
+
+      - name: Build QEMU (WHPX + slirp + GnuTLS)
+        shell: msys2 {0}
+        run: |
+          set -e
+          export PATH=/ucrt64/bin:$PATH
+          VER="${{ steps.qemu-ver.outputs.version }}"
+
+          tar -xf "qemu-$VER.tar.xz"
+          cd "qemu-$VER"
+          mkdir build && cd build
+
+          ../configure \
+            --target-list=x86_64-softmmu \
+            --enable-whpx \
+            --enable-slirp \
+            --enable-gnutls \
+            --disable-gtk \
+            --disable-sdl \
+            --disable-vnc \
+            --disable-audio-alsa \
+            --disable-audio-pa \
+            --disable-usb-redir \
+            --disable-spice \
+            --disable-dbus-display \
+            --disable-curses \
+            --prefix=/qemu-dist
+
+          ninja -j$(nproc)
+          ninja install
+
+      - name: Collect QEMU bundle
+        shell: pwsh
+        run: |
+          $dist = "dist/qemu-windows"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item C:/msys64/qemu-dist/bin/qemu-system-x86_64.exe $dist
+          Copy-Item C:/msys64/qemu-dist/bin/qemu-img.exe $dist
+          New-Item -ItemType Directory -Force -Path "$dist/share/qemu" | Out-Null
+          Copy-Item "C:/msys64/qemu-dist/share/qemu/*" "$dist/share/qemu/" -Recurse
+
+          # Runtime DLLs
+          $dlls = @(
+            "C:/msys64/ucrt64/bin/libgnutls-30.dll",
+            "C:/msys64/ucrt64/bin/libgcc_s_seh-1.dll",
+            "C:/msys64/ucrt64/bin/libstdc++-6.dll",
+            "C:/msys64/ucrt64/bin/libwinpthread-1.dll",
+            "C:/msys64/ucrt64/bin/libslirp-0.dll",
+            "C:/msys64/ucrt64/bin/libpixman-1-0.dll",
+            "C:/msys64/ucrt64/bin/libz-1.dll",
+            "C:/msys64/ucrt64/bin/libnettle-8.dll",
+            "C:/msys64/ucrt64/bin/libhogweed-6.dll",
+            "C:/msys64/ucrt64/bin/libgmp-10.dll",
+            "C:/msys64/ucrt64/bin/libp11-kit-0.dll",
+            "C:/msys64/ucrt64/bin/libidn2-0.dll",
+            "C:/msys64/ucrt64/bin/libunistring-5.dll",
+            "C:/msys64/ucrt64/bin/libtasn1-6.dll"
+          )
+          foreach ($dll in $dlls) {
+            if (Test-Path $dll) { Copy-Item $dll $dist }
+          }
+
+          # Emit SHA-256.
+          Compress-Archive -Path $dist -DestinationPath dist/qemu-windows.zip -Force
+          $hash = (Get-FileHash dist/qemu-windows.zip -Algorithm SHA256).Hash.ToLower()
+          echo "QEMU bundle SHA256: $hash"
+          echo $hash > dist/qemu-windows.sha256
+
+      - name: Build .NET solution
+        run: dotnet build Serpy.slnx -c Release
+
+      - name: Verify WHPX is available (pre-check)
+        shell: pwsh
+        run: |
+          # This step fails fast if WHPX is not available on the self-hosted runner,
+          # rather than discovering it buried in a QEMU error log.
+          # The runner MUST have Windows Hypervisor Platform enabled and rebooted.
+          $feature = Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform" -ErrorAction Stop
+          if ($feature.State -ne "Enabled") {
+            Write-Error "HypervisorPlatform feature is not Enabled on this runner. State: $($feature.State). Enable it and reboot before registering this runner."
+            exit 1
+          }
+          Write-Host "HypervisorPlatform: $($feature.State)"
+
+      # ── Managed-bundle smoke ────────────────────────────────────────────────
+      # KTD11 / U2 requirement: the smoke must exercise the DELIVERED runtime chain —
+      # ManagedRuntimeResolver.EnsureInstalledAsync() → SHA-256 verify → safe extract →
+      # -version probe → then mTLS QMP query-status/quit.
+      # The CI step achieves this by:
+      #   1. Serving the locally-built zip via a loopback file:// URI patched into versions.yaml.
+      #   2. Setting SERPY_QEMU_VERSIONS_YAML so the resolver reads the patched manifest.
+      #   3. The smoke test uses ManagedRuntimeResolver (not a raw SERPY_QEMU_DIR path).
+
+      - name: Patch versions.yaml with bundle URL and SHA
+        shell: pwsh
+        run: |
+          $zipPath = "${{ github.workspace }}/dist/qemu-windows.zip"
+          $sha = (Get-Content "${{ github.workspace }}/dist/qemu-windows.sha256").Trim()
+          $ver = "${{ steps.qemu-ver.outputs.version }}"
+          # File URI that ManagedRuntimeResolver can download from (localhost loopback).
+          $fileUri = "file:///" + $zipPath.Replace("\", "/")
+
+          $yaml = Get-Content "config/versions.yaml" -Raw
+          $yaml = $yaml -replace 'archiveUrl:\s*""', "archiveUrl: `"$fileUri`""
+          $yaml = $yaml -replace 'sha256:\s*""(\s*#.*)?', "sha256: `"$sha`""
+          Set-Content "config/versions.yaml" $yaml
+
+          Write-Host "Patched versions.yaml: archiveUrl=$fileUri sha256=$sha"
+          # Emit the patched file path for downstream steps.
+          echo "SERPY_QEMU_VERSIONS_YAML=${{ github.workspace }}/config/versions.yaml" >> $env:GITHUB_ENV
+
+      - name: Verify WHPX is available (pre-check)
+        shell: pwsh
+        run: |
+          $feature = Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform" -ErrorAction Stop
+          if ($feature.State -ne "Enabled") {
+            Write-Error "HypervisorPlatform is not Enabled. State: $($feature.State). Enable it and reboot before registering this runner."
+            exit 1
+          }
+          Write-Host "HypervisorPlatform: $($feature.State)"
+
+      - name: Run mTLS QMP smoke tests (managed bundle path)
+        env:
+          SERPY_RUN_SMOKE: "1"
+          # ManagedRuntimeResolver reads the patched versions.yaml so it downloads
+          # the locally-built zip, verifies its SHA-256, safely extracts it, runs
+          # -version and -machine none probes, and only then does the mTLS QMP smoke.
+          SERPY_QEMU_VERSIONS_YAML: ${{ env.SERPY_QEMU_VERSIONS_YAML }}
+        run: |
+          dotnet test tests/Serpy.Windows.IntegrationTests/Serpy.Windows.IntegrationTests.csproj `
+            -c Release --logger "console;verbosity=normal" --no-build
+
+      - name: Upload QEMU bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-windows-bundle
+          path: |
+            dist/qemu-windows.zip
+            dist/qemu-windows.sha256
+          retention-days: 90
