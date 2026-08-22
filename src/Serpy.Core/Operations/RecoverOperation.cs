@@ -104,12 +104,11 @@ public sealed class RecoverOperation(
         var currentMatchesReplacement = newManifest.MatchesImageDigest(SystemImagePath);
         var postCopyBeforeJournal = journalTargetsReplacement &&
             IsCompletedCopyAwaitingJournal(
-                currentImageSha256: newManifest.ImageSha256,
-                replacementImageSha256: newManifest.ImageSha256,
-                originalImageSha256: state.RecoveryJournal!.SourceImageSha256,
-                backupImageExists: backupExists,
-                diskSwapped: state.RecoveryJournal.DiskSwapped) &&
-            currentMatchesReplacement;
+                currentMatchesReplacement,
+                state.RecoveryJournal!.SourceImageSha256,
+                newManifest.ImageSha256,
+                backupExists,
+                state.RecoveryJournal.DiskSwapped);
 
         if (interruptedSwapAwaitingCopy)
         {
@@ -322,12 +321,12 @@ public sealed class RecoverOperation(
         !systemImageExists && backupImageExists;
 
     public static bool IsCompletedCopyAwaitingJournal(
-        string currentImageSha256, string replacementImageSha256, string originalImageSha256,
-        bool backupImageExists, bool diskSwapped) =>
-        !diskSwapped && backupImageExists &&
+        bool currentMatchesReplacement, string originalImageSha256,
+        string replacementImageSha256, bool backupImageExists, bool diskSwapped) =>
+        currentMatchesReplacement && !diskSwapped && backupImageExists &&
         !string.IsNullOrWhiteSpace(originalImageSha256) &&
-        !string.Equals(originalImageSha256, replacementImageSha256, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(currentImageSha256, replacementImageSha256, StringComparison.OrdinalIgnoreCase);
+        !string.Equals(originalImageSha256, replacementImageSha256,
+            StringComparison.OrdinalIgnoreCase);
 
     public static bool IsInterruptedSwapAwaitingCopy(
         bool journalTargetsReplacement, bool systemImageExists,

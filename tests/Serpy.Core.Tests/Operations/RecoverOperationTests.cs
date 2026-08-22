@@ -223,34 +223,34 @@ public sealed class RecoverySwapStateTests
     }
 
     [Fact]
-    public void DistinctReplacementPresentWithBackupBeforeJournalUpdate_IsDetectedAsCompletedCopy()
+    public void VerifiedReplacementWithDistinctSource_IsDetectedAsCompletedCopy()
     {
         Assert.True(RecoverOperation.IsCompletedCopyAwaitingJournal(
-            currentImageSha256: "replacement-digest",
-            replacementImageSha256: "replacement-digest",
+            currentMatchesReplacement: true,
             originalImageSha256: "original-digest",
+            replacementImageSha256: "replacement-digest",
             backupImageExists: true,
             diskSwapped: false));
     }
 
     [Fact]
-    public void DuplicateReplacementWithBackupBeforeJournalUpdate_IsNotTreatedAsCompletedCopy()
+    public void DuplicateReplacementWithBackup_IsNotTreatedAsCompletedCopy()
     {
         Assert.False(RecoverOperation.IsCompletedCopyAwaitingJournal(
-            currentImageSha256: "same-digest",
-            replacementImageSha256: "same-digest",
+            currentMatchesReplacement: true,
             originalImageSha256: "same-digest",
+            replacementImageSha256: "same-digest",
             backupImageExists: true,
             diskSwapped: false));
     }
 
     [Fact]
-    public void UnrecognizedSystemWithBackup_IsNotDetectedAsCompletedCopy()
+    public void UnverifiedCurrentImage_IsNotDetectedAsCompletedCopy()
     {
         Assert.False(RecoverOperation.IsCompletedCopyAwaitingJournal(
-            currentImageSha256: "unknown-digest",
-            replacementImageSha256: "replacement-digest",
+            currentMatchesReplacement: false,
             originalImageSha256: "original-digest",
+            replacementImageSha256: "replacement-digest",
             backupImageExists: true,
             diskSwapped: false));
     }
