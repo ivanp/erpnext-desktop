@@ -19,13 +19,15 @@
 
 | Suite | Tests | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 124 | Pass — 2026-08-22 |
-| `Serpy.App.Tests` | 47 | Pass — 2026-08-22 |
-| Windows appliance integration | — | Not run: full ERPNext build/init/endurance experiment remains pending |
+| `Serpy.Core.Tests` | 136 | Pass — 2026-08-23 |
+| `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
+| Windows appliance integration | 2 opt-in guards pass | Full build/init/endurance experiment blocked: workspace empty and required `SERPY_ADMIN_PASSWORD` / `SERPY_RUN_APPLIANCE` are unset |
 
 ### Windows Native-AOT publish
 
-The Windows Native-AOT runtime pack was restored successfully using `dotnet restore -r win-x64 /p:PublishAot=true`. Local publish reached ILCompiler, then stopped because this workstation lacks the Microsoft C++ platform linker (`link.exe`/`rc.exe`). The CI `windows-latest` job restores the AOT runtime pack, publishes self-contained Native-AOT, and asserts `Serpy.App.exe` plus all provisioning assets before packaging.
+The Windows Native-AOT runtime pack restored successfully using `dotnet restore -r win-x64 /p:PublishAot=true`. On 2026-08-23, local publish reached ILCompiler and stopped because this workstation lacks the Microsoft C++ platform linker (`link.exe`/`rc.exe`); `vswhere` found no installation with `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`. The CI `windows-latest` job restores the AOT runtime pack, publishes self-contained Native-AOT, and asserts `Serpy.App.exe` plus all provisioning assets before packaging.
+
+`Serpy.App` build output contains every provisioning asset (`config/versions.yaml`, NoCloud seed templates, and guest helpers), proven by `PackagingAssetTests`. Native-AOT executable proof remains CI-owned until the Desktop C++ workload is installed locally.
 
 The portable package script was syntax-checked and exercised against a complete synthetic AOT publish layout; it produced a ZIP, `SHA256SUMS.txt`, and the QEMU source notice. This is packaging-path verification, not a Native-AOT executable proof.
 ---
