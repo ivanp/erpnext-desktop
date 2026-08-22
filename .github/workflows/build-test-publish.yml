@@ -43,16 +43,37 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Restore Native-AOT runtime pack
+        run: dotnet restore src/Serpy.App/Serpy.App.csproj -r win-x64 /p:PublishAot=true
+
       - name: Publish Serpy.App (Windows x64, Native-AOT)
         run: |
           dotnet publish src/Serpy.App/Serpy.App.csproj `
-            -c Release -r win-x64 `
+            -c Release -r win-x64 --no-restore `
             /p:PublishAot=true `
+            /p:SelfContained=true `
             -o publish/win-x64
 
-      - name: Upload publish artifact
+      - name: Assert Native-AOT executable and provisioning assets
+        run: |
+          $required = @(
+            'publish/win-x64/Serpy.App.exe',
+            'publish/win-x64/config/versions.yaml',
+            'publish/win-x64/cloud-init/user-data',
+            'publish/win-x64/cloud-init/meta-data',
+            'publish/win-x64/guest/init-data.sh',
+            'publish/win-x64/guest/recover.sh',
+            'publish/win-x64/guest/provision-done.sh'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "Missing Native-AOT publish output: $($missing -join ', ')" }
+
+      - name: Package portable Windows ZIP
+        run: ./eng/package-windows.ps1 -PublishDirectory publish/win-x64 -OutputDirectory dist
+
+      - name: Upload Windows distribution
         uses: actions/upload-artifact@v4
         with:
           name: serpy-app-win-x64
-          path: publish/win-x64/
+          path: dist/
           retention-days: 30

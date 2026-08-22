@@ -13,14 +13,15 @@ public sealed class FakeApplianceService : IApplianceService
         ReadinessState.Initialized, HealthState.Stopped, null, null, null, null);
 
     public List<OperationKind> CalledOperations { get; } = [];
+    public string? RecoveryImagePath { get; private set; }
 
     public Task<OperationResult> BuildAsync(IProgress<OperationUpdate> p, CancellationToken ct = default)
-        => Task.FromResult(Ok(OperationKind.Build));
+    { CalledOperations.Add(OperationKind.Build); return Task.FromResult(Ok(OperationKind.Build)); }
 
     public Task<OperationResult> InitializeAsync(
         Serpy.Core.Contracts.InitializationParameters parameters,
         IProgress<OperationUpdate> p, CancellationToken ct = default)
-        => Task.FromResult(Ok(OperationKind.Initialize));
+    { CalledOperations.Add(OperationKind.Initialize); return Task.FromResult(Ok(OperationKind.Initialize)); }
 
     public Task<OperationResult> StartAsync(IProgress<OperationUpdate> p, CancellationToken ct = default)
     { CalledOperations.Add(OperationKind.Start); return Task.FromResult(Ok(OperationKind.Start)); }
@@ -29,10 +30,14 @@ public sealed class FakeApplianceService : IApplianceService
     { CalledOperations.Add(OperationKind.Stop); return Task.FromResult(Ok(OperationKind.Stop)); }
 
     public Task<OperationResult> RestartAsync(IProgress<OperationUpdate> p, CancellationToken ct = default)
-        => Task.FromResult(Ok(OperationKind.Restart));
+    { CalledOperations.Add(OperationKind.Restart); return Task.FromResult(Ok(OperationKind.Restart)); }
 
     public Task<OperationResult> RecoverAsync(string path, IProgress<OperationUpdate> p, CancellationToken ct = default)
-        => Task.FromResult(Ok(OperationKind.Recover));
+    {
+        RecoveryImagePath = path;
+        CalledOperations.Add(OperationKind.Recover);
+        return Task.FromResult(Ok(OperationKind.Recover));
+    }
 
     public Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default)
         => Task.FromResult(Status);

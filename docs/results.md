@@ -15,13 +15,19 @@
 
 ---
 
-## Unit test results
+## Deterministic verification
 
 | Suite | Tests | Status |
-|---|---|---|
-| `Serpy.Core.Tests` | 66 | ✅ Pass |
-| `Serpy.App.Tests` | 19 | ✅ Pass |
+|---|---:|---|
+| `Serpy.Core.Tests` | 122 | Pass — 2026-08-22 |
+| `Serpy.App.Tests` | 47 | Pass — 2026-08-22 |
+| Windows appliance integration | — | Not run: full ERPNext build/init/endurance experiment remains pending |
 
+### Windows Native-AOT publish
+
+The Windows Native-AOT runtime pack was restored successfully using `dotnet restore -r win-x64 /p:PublishAot=true`. Local publish reached ILCompiler, then stopped because this workstation lacks the Microsoft C++ platform linker (`link.exe`/`rc.exe`). The CI `windows-latest` job restores the AOT runtime pack, publishes self-contained Native-AOT, and asserts `Serpy.App.exe` plus all provisioning assets before packaging.
+
+The portable package script was syntax-checked and exercised against a complete synthetic AOT publish layout; it produced a ZIP, `SHA256SUMS.txt`, and the QEMU source notice. This is packaging-path verification, not a Native-AOT executable proof.
 ---
 
 ## U2 — Managed QEMU bundle + WHPX + mTLS QMP smoke
@@ -67,7 +73,7 @@ path in `ManagedRuntimeResolver` is exercised on a clean machine via `qemu-windo
 
 ## U3–U7 — appliance workflow
 
-**Status: U3 ✅ done, U4 ✅ done, U5 in progress, U6–U7 pending**
+**Status: U3–U5 implemented and unit-tested; U6 dashboard/tray/splash/autostart, including guarded recovery selection and acknowledgement, implemented and unit-tested. Avalonia.Headless covers dashboard status/progress rendering, tray-menu presence, dashboard close-to-tray/reopen behavior, tray-only initial-window policy, and explicit Stop / Leave-running / Cancel exit decisions. U7 packaging and CI wiring implemented. A tray-only desktop smoke ran without an exception (the expected GUI process remained active until the 8-second harness timeout). Full Windows appliance build/init/persistence/recovery/durability experiments remain pending.**
 
 ---
 
@@ -77,9 +83,9 @@ path in `ManagedRuntimeResolver` is exercised on a clean machine via `qemu-windo
 
 | Component | Lock | Installed | Floor | Status |
 |---|---|---|---|---|
-| Python | 3.14.1 | — | 3.14.0 | PENDING |
-| Node.js | 24.2.0 | — | 24.0.0 | PENDING |
-| MariaDB | 11.8.3 | — | 11.8.0 | PENDING |
-| Redis | 8.0.1 | — | 8.0.0 | PENDING |
-| Frappe | version-16 | — | 16.0.0 | PENDING |
-| ERPNext | version-16 | — | 16.0.0 | PENDING |
+| Python | 3.14.7 | — | 3.14.0 | PENDING full appliance build |
+| Node.js | 24.2.0 | — | 24.0.0 | PENDING full appliance build |
+| MariaDB | 11.8.3 | — | 11.8.0 | PENDING full appliance build |
+| Redis | 8.0.1 | — | 8.0.0 | PENDING full appliance build |
+| Frappe | 16.31.0 | — | 16.0.0 | PENDING full appliance build |
+| ERPNext | 16.32.3 | — | 16.0.0 | PENDING full appliance build |

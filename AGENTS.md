@@ -1,7 +1,73 @@
+# AGENTS.md
+
+Guidance for AI coding agents working in this repository.
+
+## Project
+
+Serpy — a headless Debian 13 / ERPNext v16 QEMU appliance operated by a Windows-first .NET 10 Avalonia GUI host. The host is a single per-user desktop/tray application (`Serpy.App`) over one lifecycle core (`Serpy.Core`). ERPNext is exposed only on `http://127.0.0.1:<port>` (default 18080) via QEMU user-mode NAT.
+
+Authoritative plan: `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md`. Verification outcomes: `docs/results.md`.
+
+## Status
+
+- U1–U5 complete: solution scaffold, managed QEMU/WHPX bundle + mTLS QMP/QGA, cloud-init build pipeline, persistent data init, lifecycle operations.
+- U6 in progress: Avalonia dashboard, tray, splash, `--tray` autostart, Run-key registration.
+- U7 pending: endurance verification, packaging, CI, operator docs.
+
+## Architecture
+
+| Layer | Component |
+|---|---|
+| GUI + tray | `src/Serpy.App` — Avalonia dashboard, `TrayIcon`, splash, `--tray` autostart |
+| Lifecycle core | `src/Serpy.Core` — `IApplianceService`, state store, lifecycle lock, operations |
+| Runtime | Managed QEMU bundle (WHPX, GnuTLS mTLS, slirp NAT) |
+| System disk | `system.qcow2` — replaceable OS + ERPNext runtime |
+| Data disk | `data.img` — persistent RAW ext4, MariaDB datadir + Frappe sites |
+
+Key source layout (`src/Serpy.Core/`):
+
+- `Contracts/` — `IApplianceService` (Build/Initialize/Start/Stop/Restart/Recover/Status), `ApplianceStatus`, `OperationResult`, `OperationUpdate`.
+- `Operations/` — `ApplianceService` (composition root, serializes mutations through `LifecycleLock`) plus one operation class per verb.
+- `Qemu/` — `AcceleratorPolicy` (table-driven WHPX/KVM/HVF), `QemuArguments`, `QemuProcess`, `ManagedRuntimeResolver` (SHA-verified bundle), `WhpxProbe`, `TlsCertificateStore`.
+- `Protocols/` — `QmpClient`, `QgaClient`, `SerialClient` (TCP loopback, mTLS).
+- `Images/` — `BaseImageDownloader`, `NoCloudSeedWriter`, `QemuImageTool`, `SystemImageManifest`.
+- `Versions/` — `VersionManifestLoader`, `VersionEvaluator`, `VersionGate` (R9 lock/floor checks).
+- `Health/` — `HealthChecker`, `HealthCredentials` (R11 functional gate).
+- `Coordination/` — `LifecycleLock`, `StateStore`, `ApplianceState`, `ProcessIdentity`.
+- `Configuration/` — `ApplianceSettings`, `KnownPaths`.
+
+## Invariants (do not break)
+
+- **Lifecycle rules live in `Serpy.Core` only.** ViewModels must never spawn QEMU, write state, or parse QMP. All mutating operations serialize through `LifecycleLock`; status reads do not acquire it.
+- **Two-disk boundary.** MariaDB datadir and Frappe `sites/` (incl. `site_config.json` / `encryption_key`) must live physically on `data.img`; `system.qcow2` is disposable. `init` commits the final disk name only after the health gate passes and the guest halts cleanly.
+- **Recovery guards.** `recover` rejects MariaDB/Frappe/ERPNext downgrades before mutation; runs `mariadb-upgrade` only when needed, then `bench migrate`; a durable recovery journal blocks normal `start` until a compatible `recover` completes the health gate.
+- **Managed QEMU, no PATH dependency.** QEMU is SHA-verified and installed under `%LOCALAPPDATA%\Serpy\runtime`; never rely on QEMU on PATH.
+- **Windows-first honesty.** Windows x64/WHPX is the delivered, runtime-verified platform. macOS (HVF) / Linux (KVM) are compile/publish-checked extension targets only — do not claim runtime verification for them.
+- **Credentials.** ERP health credentials live in the current-user Windows secret store (DPAPI), keyed by workspace; never pass them as command-line arguments or persist them in state/logs.
+
+## Build & test
+
+```bash
+dotnet build Serpy.slnx -c Release
+dotnet test Serpy.slnx -c Release --filter "FullyQualifiedName!~IntegrationTests"
+```
+
+- `Directory.Build.props`: net10.0, nullable, `TreatWarningsAsErrors`, central package management, `IsAotCompatible`.
+- `Serpy.App` publishes Native-AOT (`PublishAot=true`) for Windows x64 — keep AOT compatibility (no unsupported reflection).
+- WHPX integration tests (`tests/Serpy.Windows.IntegrationTests`) are opt-in and require a WHPX-enabled machine; they are excluded from the default filter.
+- `config/versions.yaml` holds exact locks and floors; `Serpy.Core` parses/validates it at build/init time (R9).
+
+## Conventions
+
+- Follow the plan's requirement IDs (R1–R17), key decisions (KD1–KD7), and implementation units (U1–U7) when touching behavior.
+- Update `docs/results.md` when verification outcomes change.
+- Guest helper scripts live in `guest/` (`init-data.sh`, `recover.sh`, `provision-done.sh`); cloud-init seeds in `build/cloud-init/`.
+- CI: `build-test-publish.yml` (build/test + Windows Native-AOT publish), `qemu-windows.yml` (self-hosted WHPX runner, QEMU bundle build + mTLS smoke).
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **erpnext-desktop** (1016 symbols, 2247 relationships, 81 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **erpnext-desktop** (1167 symbols, 2668 relationships, 97 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
