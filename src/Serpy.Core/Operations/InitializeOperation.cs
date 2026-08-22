@@ -6,6 +6,7 @@ using Serpy.Core.Health;
 using Serpy.Core.Images;
 using Serpy.Core.Protocols;
 using Serpy.Core.Protocols.Qga;
+using Serpy.Core.Protocols.Qmp;
 using Serpy.Core.Qemu;
 
 namespace Serpy.Core.Operations;
@@ -76,6 +77,7 @@ public sealed class InitializeOperation(
             var accel      = AcceleratorPolicy.Resolve();
 
             int serialPort = EphemeralPort.Allocate();
+            int qmpPort    = EphemeralPort.Allocate();
             int qgaPort    = EphemeralPort.Allocate();
 
             var args = new QemuArguments()
@@ -87,9 +89,13 @@ public sealed class InitializeOperation(
                 .DataDisk(PendingDataPath, accel)
                 .UserNetWithPortForward(settings.ErpNextPort)
                 .TlsCredsX509("tls-serial", certStore.QemuCertDir)
+                .TlsCredsX509("tls-qmp",    certStore.QemuCertDir)
                 .TlsCredsX509("tls-qga",    certStore.QemuCertDir)
                 .TlsChardev("serial0", serialPort, "tls-serial")
+                .SerialOnChardev("serial0")
+                .TlsChardev("qmp0",    qmpPort,    "tls-qmp")
                 .TlsChardev("qga0",    qgaPort,    "tls-qga")
+                .QmpOnChardev("qmp0")
                 .VirtioSerialDevice().QgaVirtioPort("qga0");
 
             // 3. Boot.
@@ -130,10 +136,17 @@ public sealed class InitializeOperation(
                     $"Health check failed [{health.FailedCheck}]: {health.Reason}",
                     logPath, ct);
 
-            // 7. Graceful powerdown.
-            Report("powerdown", "Powering down…", 95);
-            var exited = await proc.WaitForExitAsync(TimeSpan.FromMinutes(5), ct);
-            if (!exited) proc.Kill();
+            // 7. Host-side authenticated graceful shutdown; cloud-init leaves the VM up.
+            Report("powerdown", "Sending graceful powerdown via QMP…", 95);
+            await using var qmp = await QmpClient.ConnectAsync(
+                "127.0.0.1", qmpPort, clientCert, caCert, ct);
+            await qmp.SendPowerdownAsync(ct);
+            if (!await qmp.WaitForShutdownEventAsync(TimeSpan.FromMinutes(3), ct))
+                return await AbortAndRetainAsync(proc, operationId,
+                    "QMP did not confirm guest shutdown; pending data disk retained.", logPath, ct);
+            if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
+                return await AbortAndRetainAsync(proc, operationId,
+                    "QEMU did not exit after graceful shutdown; pending data disk retained.", logPath, ct);
 
             // 8. Atomic commit.
             File.Move(PendingDataPath, FinalDataPath);

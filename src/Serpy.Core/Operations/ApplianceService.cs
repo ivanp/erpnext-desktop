@@ -68,6 +68,11 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         Contracts.InitializationParameters parameters,
         IProgress<OperationUpdate> progress, CancellationToken ct = default)
     {
+        if (!Contracts.InitializationParameters.IsValidSiteName(parameters.SiteName))
+            return new OperationResult(Guid.NewGuid(), OperationKind.Initialize,
+                OperationOutcome.Failure,
+                "Site name must be a lowercase fully qualified domain name (for example, site1.local).");
+
         var lease = _lock.TryAcquire(TimeSpan.Zero);
         if (lease is null) return Busy(OperationKind.Initialize);
         using (lease)

@@ -35,6 +35,15 @@ public sealed class QemuArgumentsTests
     }
 
     [Fact]
+    public void SerialOnChardev_AttachesTlsSocketToGuestUart()
+    {
+        var args = new QemuArguments().TlsChardev("serial0", 51844, "tls-serial")
+            .SerialOnChardev("serial0");
+
+        AssertContainsSequence(args.Args, "-serial", "chardev:serial0");
+    }
+
+    [Fact]
     public void TlsCredsX509_ContainsVerifyPeer()
     {
         var args = new QemuArguments().TlsCredsX509("tls-qmp", "/certs/qemu");

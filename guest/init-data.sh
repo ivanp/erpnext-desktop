@@ -1,22 +1,23 @@
 #!/bin/bash
 # Guest helper: initialize data.img for a new appliance.
-# Called via QGA from the .NET host during the Initialize operation.
+# Called through QGA during InitializeOperation.
+#
+# Credential safety (R11/U4): the host sends the Administrator password as
+# QGA stdin. The fixed Python process below inherits that pipe and passes the
+# value directly to Frappe's internal site-creation function in memory. It is
+# never an argv value, environment value, or guest file readable by frappe.
+#
 # Preconditions:
-#   - /dev/vdb is the attached sparse RAW data.img
-#   - No initialized-marker file exists (host checked before calling)
-#   - /data is a mount point (fstab entry must exist)
+# - /dev/vdb is the attached sparse RAW data.img.
+# - The host has validated SITE_NAME as a lowercase FQDN.
+# - No initialized marker exists (the host checks before calling).
 # Postconditions:
-#   - /dev/vdb has an ext4 filesystem labeled SERPY_DATA
-#   - /data is mounted
-#   - /data/mariadb and /data/frappe/sites exist
-#   - MariaDB datadir is /data/mariadb (bind mount active)
-#   - One Frappe site created and ERPNext installed
-#   - Sentinel marker written to /data/.serpy-initialized
+# - /data contains the MariaDB datadir and Frappe sites tree.
+# - a new Frappe/ERPNext site has been created and configured.
+# - /data/.serpy-initialized exists.
 set -euo pipefail
 
-SITE_NAME="${1:-site1.local}"
-ADMIN_PASSWORD="${2:-}"  # passed via stdin by QGA, never in cmdline args
-
+SITE_NAME="${1:?site name is required}"
 DATA_DEV="/dev/vdb"
 MOUNT_POINT="/data"
 MARKER="$MOUNT_POINT/.serpy-initialized"
@@ -25,63 +26,96 @@ FRAPPE_USER="frappe"
 
 log() { echo "[init-data] $*"; }
 
-# Refuse re-initialization if marker exists on mounted disk.
-if mount | grep -q "$MOUNT_POINT"; then
-    if [[ -f "$MARKER" ]]; then
+# A fixed command string is intentional: the validated site name is supplied
+# as $1 to the child shell, never interpolated into its source text.
+run_bench() {
+    runuser -u "$FRAPPE_USER" -- sh -c \
+        'cd /home/frappe/frappe-bench && exec ./env/bin/bench "$@"' \
+        serpy-bench "$@"
+}
+
+# -- Disk setup -------------------------------------------------------------
+if mountpoint -q "$MOUNT_POINT"; then
+    if [ -f "$MARKER" ]; then
         echo "ERROR: $MARKER already exists. Refusing re-initialization." >&2
         exit 1
     fi
 else
     log "Formatting $DATA_DEV as ext4 (label SERPY_DATA)…"
     mkfs.ext4 -L SERPY_DATA "$DATA_DEV"
-
     log "Mounting $DATA_DEV at $MOUNT_POINT…"
     mount -t ext4 "$DATA_DEV" "$MOUNT_POINT"
 fi
 
-# Create persistent directories.
+# -- Persistent directories -------------------------------------------------
 log "Creating /data subdirectories…"
 mkdir -p "$MOUNT_POINT/mariadb" "$MOUNT_POINT/frappe/sites"
+# The mounted sites tree must be writable by the unprivileged Frappe process
+# before it creates the first site and its site_config.json.
+chown -R "$FRAPPE_USER":"$FRAPPE_USER" "$MOUNT_POINT/frappe"
 
-# Stop MariaDB before moving datadir.
+# -- MariaDB ----------------------------------------------------------------
 log "Stopping MariaDB…"
 systemctl stop mariadb
-
-# Initialize MariaDB datadir on data.img.
 log "Initializing MariaDB datadir on /data/mariadb…"
 mariadb-install-db --user=mysql --datadir="$MOUNT_POINT/mariadb"
 
-# Activate bind mount: /data/mariadb → /var/lib/mysql.
+# Persist the ext4 data disk and both data-bearing bind mounts before the
+# appliance target can start them on a later normal boot. The filesystem label
+# avoids depending on VirtIO enumeration order.
+for entry in \
+    "LABEL=SERPY_DATA /data ext4 defaults 0 2" \
+    "/data/mariadb /var/lib/mysql none bind 0 0" \
+    "/data/frappe/sites /home/frappe/frappe-bench/sites none bind 0 0"; do
+    grep -Fqx "$entry" /etc/fstab || echo "$entry" >> /etc/fstab
+done
+
 log "Activating bind mounts…"
 mount --bind "$MOUNT_POINT/mariadb" /var/lib/mysql
 mount --bind "$MOUNT_POINT/frappe/sites" "$FRAPPE_DIR/sites"
-
-# Start MariaDB with the new datadir.
 log "Starting MariaDB…"
 systemctl start mariadb
 
-# Create site.
+# -- Site creation ----------------------------------------------------------
+# Frappe v16.31.0 exposes the password only as a Click option. Calling its
+# documented internal implementation avoids serialising the secret into argv
+# while preserving the production site-creation path. The explicit new-site
+# context permits the absent site_config.json; _new_site then retains it.
 log "Creating Frappe site: $SITE_NAME"
-if [[ -n "$ADMIN_PASSWORD" ]]; then
-    su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench new-site $SITE_NAME --admin-password '$ADMIN_PASSWORD' --mariadb-root-username root --no-mariadb-socket"
-else
-    su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench new-site $SITE_NAME --mariadb-root-username root --no-mariadb-socket"
-fi
+cd "$FRAPPE_DIR"
+runuser -u "$FRAPPE_USER" -- "$FRAPPE_DIR/env/bin/python" -c '
+import sys
+import frappe
+from frappe.installer import _new_site
 
-# Install ERPNext on the site.
+site = sys.argv[1]
+password = sys.stdin.readline().rstrip("\r\n")
+if not password:
+    raise SystemExit("Admin password is required on standard input")
+frappe.init(site, sites_path="/home/frappe/frappe-bench/sites", new_site=True)
+_new_site(
+    None,
+    site,
+    db_root_username="root",
+    admin_password=password,
+)
+' "$SITE_NAME"
+
 log "Installing ERPNext on $SITE_NAME…"
-su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench --site $SITE_NAME install-app erpnext"
+run_bench --site "$SITE_NAME" install-app erpnext
+log "Setting default site…"
+run_bench use "$SITE_NAME"
 
-# Set default site.
-su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench use $SITE_NAME"
-
-# Regenerate nginx config.
-su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench setup nginx"
+# -- Production config ------------------------------------------------------
+log "Regenerating nginx configuration…"
+run_bench setup nginx
 cp "$FRAPPE_DIR/config/nginx.conf" /etc/nginx/conf.d/frappe.conf
 nginx -t && systemctl reload nginx
 
-# Write initialization marker.
+# Enable appliance target so services start on next normal boot.
+systemctl enable serpy-appliance.target
+
+# -- Marker -----------------------------------------------------------------
 log "Writing marker $MARKER…"
 echo "serpy-initialized-v1" > "$MARKER"
-
 log "Data initialization complete."

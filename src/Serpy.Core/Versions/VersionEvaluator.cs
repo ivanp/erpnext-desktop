@@ -40,8 +40,11 @@ public static class VersionEvaluator
 
     private static ParsedVersion Parse(string raw)
     {
+        var s = raw.Trim();
+        // Normalise VCS tag prefix: "v16.31.0" → "16.31.0" (bench omits the v).
+        if (s.Length > 1 && (s[0] == 'v' || s[0] == 'V') && char.IsDigit(s[1]))
+            s = s[1..];
         // Strip Debian epoch "N:" prefix.
-        var s = raw;
         var colonIdx = s.IndexOf(':');
         if (colonIdx >= 0 && colonIdx < 4) // e.g. "1:11.8.3..."
             s = s[(colonIdx + 1)..];

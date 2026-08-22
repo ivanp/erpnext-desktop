@@ -4,7 +4,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DiscUtils.Iso9660" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 </Project>

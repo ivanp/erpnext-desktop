@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Serpy.Core.Contracts;
 
 /// <summary>
@@ -10,6 +12,13 @@ public sealed record InitializationParameters(
     string SiteName,
     string AdminPassword)
 {
-    public static InitializationParameters Default =>
-        new("site1.local", string.Empty);
+    // FQDN only: safe as a process argument and valid for Frappe's site directory.
+    private static readonly Regex SiteNamePattern = new(
+        @"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+        RegexOptions.CultureInvariant);
+
+    public static InitializationParameters Default => new("site1.local", string.Empty);
+
+    public static bool IsValidSiteName(string? siteName) =>
+        siteName is not null && SiteNamePattern.IsMatch(siteName);
 }

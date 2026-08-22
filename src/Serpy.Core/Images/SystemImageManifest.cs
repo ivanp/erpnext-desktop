@@ -17,6 +17,21 @@ public sealed class SystemImageManifest
     [JsonPropertyName("buildTimestamp")]
     public DateTimeOffset BuildTimestamp { get; set; }
 
+    /// <summary>SHA-256 of the exact accepted system.qcow2 bytes.</summary>
+    [JsonPropertyName("imageSha256")]
+    public string ImageSha256 { get; set; } = string.Empty;
+
     [JsonPropertyName("versions")]
     public GuestVersionReport Versions { get; set; } = new();
+
+    /// <summary>Verifies that this manifest attests to the supplied image bytes.</summary>
+    public bool MatchesImageDigest(string imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(ImageSha256) || !File.Exists(imagePath)) return false;
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var stream = File.OpenRead(imagePath);
+        return string.Equals(
+            Convert.ToHexString(sha.ComputeHash(stream)), ImageSha256,
+            StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -1,15 +1,11 @@
 #cloud-config
 # Serpy appliance provisioning — site-less system image build.
-# Installs all runtime (MariaDB, Redis, Python, Node, QGA, Bench, Frappe, ERPNext).
-# Does NOT create a site or initialize the MariaDB datadir (KD4).
-# All versions must match config/versions.yaml exact locks.
+# The build contains runtime only: no ERPNext site and no /data database.
 
 apt:
   sources:
     mariadb:
       source: "deb https://downloads.mariadb.com/MariaDB/mariadb-11.8/repo/debian $RELEASE main"
-      key: |
-        # MariaDB signing key — fetched inline by cloud-init
       keyid: "177F4010FE56CA3336300305F1656F24C74CD1D8"
 
 packages:
@@ -20,9 +16,7 @@ packages:
   - qemu-guest-agent
   - nginx
   - supervisor
-  - python3-dev
   - python3-pip
-  - python3-venv
   - build-essential
   - libssl-dev
   - libffi-dev
@@ -37,76 +31,84 @@ package_update: true
 package_upgrade: true
 
 runcmd:
-  # Install pinned Python 3.14 from deadsnakes
-  - add-apt-repository -y ppa:deadsnakes/ppa
+  # Trixie has Python 3.13. This adds only the explicit Python 3.14 packages
+  # from an immutable Debian snapshot; other sid packages stay pinned at 1.
+  - printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ sid main' > /etc/apt/sources.list.d/serpy-python314.list
+  - printf '%s\n' 'Package: *' 'Pin: release a=unstable' 'Pin-Priority: 1' '' 'Package: python3.14 python3.14-dev python3.14-venv libpython3.14 libpython3.14-minimal libpython3.14-stdlib libpython3.14-dev' 'Pin: release a=unstable' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-python314
   - apt-get update -q
-  - apt-get install -y python3.14 python3.14-dev python3.14-venv
-  - update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.14 100
-
-  # Install pinned Node 24 via NodeSource
+  - apt-get install -y -t sid python3.14=3.14.7-1 python3.14-dev=3.14.7-1 python3.14-venv=3.14.7-1
+  - python3.14 -m ensurepip --upgrade
+  - python3.14 -m pip install --no-cache-dir frappe-bench==5.31.0
   - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   - apt-get install -y nodejs
-
-  # Install Bench
-  - pip3 install frappe-bench==5.x
-
-  # Create frappe user
   - useradd -m -s /bin/bash frappe
-
-  # Initialize bench as frappe user
-  - su - frappe -c "bench init --frappe-branch version-16 --python python3.14 /home/frappe/frappe-bench"
-
-  # Install ERPNext
-  - su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch version-16"
-
-  # Build production assets
+  - su - frappe -c "bench init --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench"
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch v16.32.3"
   - su - frappe -c "cd /home/frappe/frappe-bench && bench build --production"
-
-  # Configure production nginx
   - su - frappe -c "cd /home/frappe/frappe-bench && bench setup nginx"
   - cp /home/frappe/frappe-bench/config/nginx.conf /etc/nginx/conf.d/frappe.conf
   - nginx -t
-
-  # Configure supervisor
   - su - frappe -c "cd /home/frappe/frappe-bench && bench setup supervisor"
   - cp /home/frappe/frappe-bench/config/supervisor.conf /etc/supervisor/conf.d/frappe.conf
   - supervisorctl reread && supervisorctl update
-
-  # Install guest helpers
-  - install -m 0755 /var/lib/cloud/instance/scripts/provision-done.sh /usr/local/bin/provision-done.sh
-  - install -m 0755 /var/lib/cloud/instance/scripts/init-data.sh /usr/local/bin/init-data.sh
-  - install -m 0755 /var/lib/cloud/instance/scripts/recover.sh /usr/local/bin/recover.sh
-
-  # Configure systemd ordering: MariaDB and Frappe must not start without /data
   - systemctl daemon-reload
-
-  # Signal provisioning complete on serial (KTD9)
+  - systemctl disable mariadb.service supervisor.service
+  # The host performs the post-sentinel version gate and QMP powerdown.
   - /usr/local/bin/provision-done.sh
 
 write_files:
-  - path: /var/lib/cloud/instance/scripts/provision-done.sh
+  - path: /usr/local/bin/provision-done.sh
     permissions: '0755'
     content: |
-      #!/bin/bash
-      # Emit provision-done sentinel on ttyS0 (serial console).
-      # The .NET host reads this via the authenticated serial channel (KTD9).
-      echo 'SERPY_PROVISION_DONE' > /dev/ttyS0
+      @@SERPY_PROVISION_DONE@@
 
-  - path: /etc/systemd/system/mariadb-data-guard.service
+  - path: /usr/local/bin/init-data.sh
+    permissions: '0755'
+    content: |
+      @@SERPY_INIT_DATA@@
+
+  - path: /usr/local/bin/recover.sh
+    permissions: '0755'
+    content: |
+      @@SERPY_RECOVER@@
+
+  - path: /usr/local/libexec/serpy-require-data-mounted
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      exec mountpoint -q /data
+
+  - path: /etc/systemd/system/serpy-data-mounted.service
     content: |
       [Unit]
-      Description=Guard: require /data before MariaDB
-      Before=mariadb.service
-      ConditionPathIsMountPoint=/data
+      Description=Require mounted Serpy data disk
 
       [Service]
       Type=oneshot
-      ExecStart=/bin/true
-      RemainAfterExit=yes
+      ExecStart=/usr/local/libexec/serpy-require-data-mounted
+
+  - path: /etc/systemd/system/mariadb.service.d/serpy-data.conf
+    content: |
+      [Unit]
+      Requires=serpy-data-mounted.service
+      After=serpy-data-mounted.service
+
+  - path: /etc/systemd/system/supervisor.service.d/serpy-data.conf
+    content: |
+      [Unit]
+      Requires=serpy-data-mounted.service
+      After=serpy-data-mounted.service
+
+  - path: /etc/systemd/system/serpy-appliance.target
+    content: |
+      [Unit]
+      Description=Serpy initialized appliance services
+      Requires=mariadb.service supervisor.service
+      After=mariadb.service supervisor.service
 
       [Install]
-      RequiredBy=mariadb.service
+      WantedBy=multi-user.target
 
 power_state:
   mode: poweroff
-  condition: true
+  condition: false

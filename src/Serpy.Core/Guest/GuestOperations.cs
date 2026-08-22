@@ -27,7 +27,10 @@ public sealed class GuestOperations(QgaClient qga)
 
     /// <summary>
     /// Run the baked init-data.sh helper on the guest (R14, KD4).
-    /// The admin password is passed via stdin so it never appears in command args.
+    /// The admin password is passed exclusively via QGA stdin (InputData);
+    /// it never appears in command-line arguments, environment strings, or
+    /// QGA-captured args. The helper passes the inherited pipe in memory to
+    /// Frappe's pinned internal site-creation API.
     /// </summary>
     public async Task<GuestExecResult> RunInitDataAsync(
         string siteName,
@@ -37,8 +40,8 @@ public sealed class GuestOperations(QgaClient qga)
     {
         return await qga.ExecAsync(
             "/usr/local/bin/init-data.sh",
-            args: [siteName],
-            stdin: adminPassword,
+            args: [siteName],          // only the site name — never the password
+            stdin: adminPassword,       // password via stdin only
             timeout: timeout,
             ct: ct);
     }
@@ -78,6 +81,35 @@ public sealed class GuestOperations(QgaClient qga)
         var r = await qga.ExecAsync(
             "mountpoint", args: ["-q", path], ct: ct);
         return r.Succeeded;
+    }
+
+    /// <summary>
+    /// Query Frappe version via `bench version frappe`.
+    /// Returns empty string if bench is not available yet.
+    /// </summary>
+    public async Task<string> GetFrappeVersionAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await RunOutputAsync(
+                "su", ["-", "frappe", "-c",
+                    "cd /home/frappe/frappe-bench && bench version frappe"],
+                ct);
+        }
+        catch { return string.Empty; }
+    }
+
+    /// <summary>Query ERPNext version via `bench version erpnext`.</summary>
+    public async Task<string> GetErpNextVersionAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await RunOutputAsync(
+                "su", ["-", "frappe", "-c",
+                    "cd /home/frappe/frappe-bench && bench version erpnext"],
+                ct);
+        }
+        catch { return string.Empty; }
     }
 
     // ── Health sub-checks (R11) ───────────────────────────────────────────────

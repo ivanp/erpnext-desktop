@@ -7,6 +7,7 @@ using Serpy.Core.Health;
 using Serpy.Core.Images;
 using Serpy.Core.Protocols;
 using Serpy.Core.Protocols.Qga;
+using Serpy.Core.Protocols.Qmp;
 using Serpy.Core.Qemu;
 using Serpy.Core.Versions;
 
@@ -75,15 +76,65 @@ public sealed class RecoverOperation(
             ApplianceStateJsonContext.Default.SystemImageManifest);
         if (newManifest is null)
             return Fail(operationId, "Cannot parse replacement image manifest.", logPath);
+        if (!newManifest.MatchesImageDigest(replacementImagePath))
+            return Fail(operationId,
+                "Replacement image does not match its Serpy acceptance manifest digest.", logPath);
 
-        // 2. Downgrade guard.
+        // 2. Reject static-floor downgrades before mutation.
+        try { VersionGate.ValidateNoAppDowngrade(newManifest.Versions, manifest); }
+        catch (VersionGateException ex)
+        {
+            return Fail(operationId,
+                $"Downgrade rejected: {ex.Component} installed={ex.Installed} floor={ex.Floor}.", logPath);
+        }
         if (!VersionEvaluator.MeetsFloor(
-            newManifest.Versions.MariaDb, manifest.Runtime.MariaDb.Floor))
+                newManifest.Versions.MariaDb, manifest.Runtime.MariaDb.Floor))
             return Fail(operationId,
                 $"Downgrade rejected: replacement MariaDB {newManifest.Versions.MariaDb} " +
                 $"is below the minimum floor {manifest.Runtime.MariaDb.Floor}.", logPath);
 
         var state = stateStore.Read();
+        var journalTargetsReplacement = state.RecoveryJournal is { TargetImagePath: var target } &&
+            string.Equals(target, replacementImagePath, StringComparison.Ordinal);
+        var currentMatchesReplacement = newManifest.MatchesImageDigest(SystemImagePath);
+        var backupExists = File.Exists(SystemBackupPath);
+        var postCopyBeforeJournal = journalTargetsReplacement &&
+            IsCompletedCopyAwaitingJournal(currentMatchesReplacement, backupExists,
+                state.RecoveryJournal!.DiskSwapped);
+
+        if (journalTargetsReplacement && (state.RecoveryJournal!.DiskSwapped || postCopyBeforeJournal))
+        {
+            if (!currentMatchesReplacement)
+                return Fail(operationId,
+                    "Current system image does not match the accepted replacement manifest; " +
+                    "recovery cannot continue safely.", logPath);
+            if (postCopyBeforeJournal)
+            {
+                stateStore.Mutate(s => s.RecoveryJournal!.DiskSwapped = true);
+                state = stateStore.Read();
+            }
+        }
+        else
+        {
+            var installedAcceptancePath = Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
+            if (!File.Exists(installedAcceptancePath))
+                return Fail(operationId,
+                    "Current system image has no Serpy acceptance manifest; recovery cannot compare versions safely.", logPath);
+            var installedManifest = JsonSerializer.Deserialize(
+                File.ReadAllText(installedAcceptancePath),
+                ApplianceStateJsonContext.Default.SystemImageManifest);
+            if (installedManifest is null || !installedManifest.MatchesImageDigest(SystemImagePath))
+                return Fail(operationId,
+                    "Current system image does not match its Serpy acceptance manifest; " +
+                    "recovery cannot compare versions safely.", logPath);
+            try { VersionGate.ValidateReplacementDoesNotDowngrade(newManifest.Versions, installedManifest.Versions); }
+            catch (VersionGateException ex)
+            {
+                return Fail(operationId,
+                    $"Downgrade rejected: replacement {ex.Component} {ex.Installed} " +
+                    $"is below installed {ex.Floor}.", logPath);
+            }
+        }
 
         // 3. Write recovery journal (idempotent: continue if same target).
         if (state.RecoveryJournal is null ||
@@ -100,18 +151,38 @@ public sealed class RecoverOperation(
             {
                 TargetImagePath      = replacementImagePath,
                 TargetMariaDbVersion = newManifest.Versions.MariaDb,
-                TargetFrappeVersion  = newManifest.Versions.Python, // proxy: Frappe version not in R9 report
+                // Use actual Frappe version from the acceptance manifest (not a Python proxy).
+                TargetFrappeVersion  = newManifest.Versions.Frappe,
             });
             state = stateStore.Read();
         }
 
-        // 4. Swap disk (journalled; skip if already done).
+        // 4. Swap disk. An interrupted copy leaves only the original backup;
+        // preserve it and resume the copy rather than deleting the only known-good image.
         if (!state.RecoveryJournal!.DiskSwapped)
         {
             Report("swap", "Swapping system disk…", 15);
-            if (File.Exists(SystemBackupPath)) File.Delete(SystemBackupPath);
-            File.Move(SystemImagePath, SystemBackupPath);
-            File.Copy(replacementImagePath, SystemImagePath);
+            if (IsSwapInProgress(File.Exists(SystemImagePath), File.Exists(SystemBackupPath)))
+            {
+                File.Copy(replacementImagePath, SystemImagePath);
+            }
+            else
+            {
+                if (File.Exists(SystemBackupPath))
+                    return Fail(operationId,
+                        "Recovery backup exists while the current system image is still present; " +
+                        "refusing to discard the backup.", logPath);
+                File.Move(SystemImagePath, SystemBackupPath);
+                try
+                {
+                    File.Copy(replacementImagePath, SystemImagePath);
+                }
+                catch
+                {
+                    // Keep the journal open and the original image intact at SystemBackupPath for retry.
+                    throw;
+                }
+            }
             stateStore.Mutate(s => s.RecoveryJournal!.DiskSwapped = true);
         }
 
@@ -120,6 +191,7 @@ public sealed class RecoverOperation(
         var accel      = AcceleratorPolicy.Resolve();
         var dataPath   = state.DataImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "data.img");
         int serialPort = EphemeralPort.Allocate();
+        int qmpPort    = EphemeralPort.Allocate();
         int qgaPort    = EphemeralPort.Allocate();
 
         if (!certStore.IsInitialized()) certStore.GenerateCertificates();
@@ -135,9 +207,13 @@ public sealed class RecoverOperation(
             .DataDisk(dataPath, accel)
             .UserNetWithPortForward(settings.ErpNextPort)
             .TlsCredsX509("tls-serial", certStore.QemuCertDir)
+            .TlsCredsX509("tls-qmp",    certStore.QemuCertDir)
             .TlsCredsX509("tls-qga",    certStore.QemuCertDir)
             .TlsChardev("serial0", serialPort, "tls-serial")
+            .SerialOnChardev("serial0")
+            .TlsChardev("qmp0",    qmpPort,    "tls-qmp")
             .TlsChardev("qga0",    qgaPort,    "tls-qga")
+            .QmpOnChardev("qmp0")
             .VirtioSerialDevice().QgaVirtioPort("qga0");
 
         await using var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
@@ -178,16 +254,29 @@ public sealed class RecoverOperation(
             {
                 proc.Kill();
                 return Fail(operationId,
+
                     $"Post-recovery health check failed [{health.FailedCheck}]: {health.Reason}",
                     logPath);
             }
             stateStore.Mutate(s => s.RecoveryJournal!.HealthPassed = true);
         }
 
-        // 7. Powerdown and commit.
-        Report("powerdown", "Powering down…", 95);
-        var exited = await proc.WaitForExitAsync(TimeSpan.FromMinutes(5), ct);
-        if (!exited) proc.Kill();
+        // 7. Power down through the authenticated monitor; never clear the
+        // recovery journal until the process has actually exited.
+        Report("powerdown", "Sending graceful powerdown via QMP…", 95);
+        await using var qmp = await QmpClient.ConnectAsync(
+            "127.0.0.1", qmpPort, clientCert, caCert, ct);
+        await qmp.SendPowerdownAsync(ct);
+        if (!await qmp.WaitForShutdownEventAsync(TimeSpan.FromMinutes(3), ct))
+            return Fail(operationId,
+                "QMP did not confirm guest shutdown; recovery journal remains open.", logPath);
+        if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
+            return Fail(operationId,
+                "QEMU did not exit after graceful shutdown; recovery journal remains open.", logPath);
+        // Publish the acceptance manifest only after replacement health and shutdown pass.
+        // Until then the open recovery journal keeps normal start blocked.
+        File.Copy(acceptancePath, Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName), overwrite: true);
+
 
         stateStore.Mutate(s =>
         {
@@ -202,6 +291,20 @@ public sealed class RecoverOperation(
         return new OperationResult(operationId, OperationKind.Recover,
             OperationOutcome.Success, "Recovery complete.", logPath);
     }
+
+    public static bool MatchesCurrentImageForRecovery(
+        SystemImageManifest installedManifest,
+        SystemImageManifest replacementManifest,
+        bool diskSwapped,
+        string currentImagePath) =>
+        (diskSwapped ? replacementManifest : installedManifest).MatchesImageDigest(currentImagePath);
+
+    public static bool IsSwapInProgress(bool systemImageExists, bool backupImageExists) =>
+        !systemImageExists && backupImageExists;
+
+    public static bool IsCompletedCopyAwaitingJournal(
+        bool systemMatchesReplacement, bool backupImageExists, bool diskSwapped) =>
+        !diskSwapped && systemMatchesReplacement && backupImageExists;
 
     private static OperationResult Fail(Guid id, string msg, string log) =>
         new(id, OperationKind.Recover, OperationOutcome.Failure, msg, log);

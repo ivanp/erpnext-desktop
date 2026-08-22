@@ -21,9 +21,11 @@ qemu:
     archiveSha256: ""
 
 debianCloudImage:
-  version: "20250801-2143"
-  url: "https://cloud.debian.org/images/cloud/trixie/daily/20250801-2143/debian-13-genericcloud-amd64-daily-20250801-2143.qcow2"
-  sha256: ""                 # fill from download page checksum file
+  # Immutable Debian official trixie genericcloud release, published 2026-08-19.
+  # Debian publishes SHA-512, not SHA-256; BaseImageDownloader verifies this exact value.
+  version: "20260819-2575"
+  url: "https://cloud.debian.org/images/cloud/trixie/20260819-2575/debian-13-genericcloud-amd64-20260819-2575.qcow2"
+  sha512: "77429b411b39b43f914dc9d14bf34aa315489a1a12b5429f72e5b483bdda23c65698d33443c85d3f3ad7c3a0828ae60845406d6b99646342554d17abae29c2a3"
   release: "trixie"
   arch: "amd64"
 
@@ -31,7 +33,7 @@ debianCloudImage:
 # R9 build gate rejects any installed version below floor or mismatching lock.
 runtime:
   python:
-    lock: "3.14.1"
+    lock: "3.14.7"
     floor: "3.14.0"
   node:
     lock: "24.2.0"
@@ -43,11 +45,15 @@ runtime:
     lock: "8.0.1"
     floor: "8.0.0"
 
-# Frappe/ERPNext application version locks.
+# Frappe/ERPNext application version locks (exact, as reported by bench version).
+# lock: numeric version bench reports (normalised from v-prefixed provision tag).
+# minVersion: floor used by the downgrade guard during recover.
 apps:
   frappe:
-    branch: "version-16"
+    branch: "v16.31.0"
+    lock: "16.31.0"
     minVersion: "16.0.0"
   erpnext:
-    branch: "version-16"
+    branch: "v16.32.3"
+    lock: "16.32.3"
     minVersion: "16.0.0"

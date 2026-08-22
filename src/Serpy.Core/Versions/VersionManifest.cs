@@ -43,7 +43,8 @@ public sealed class VersionManifest
     {
         public string Version { get; set; } = string.Empty;
         public string Url { get; set; } = string.Empty;
-        public string Sha256 { get; set; } = string.Empty;
+        /// <summary>SHA-512 published by Debian's official cloud image descriptor.</summary>
+        public string Sha512 { get; set; } = string.Empty;
         public string Release { get; set; } = string.Empty;
         public string Arch { get; set; } = string.Empty;
     }
@@ -71,6 +72,7 @@ public sealed class VersionManifest
     public sealed class AppEntry
     {
         public string Branch { get; set; } = string.Empty;
+        public string Lock { get; set; } = string.Empty;
         public string MinVersion { get; set; } = string.Empty;
     }
 }

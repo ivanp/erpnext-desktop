@@ -12,5 +12,23 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="DiscUtils.Iso9660" />
+  </ItemGroup>
+
+  <!-- Guest helper scripts copied to build output; credential tests assert file presence. -->
+  <!-- tests/Serpy.Core.Tests → ../../ = repo root → guest/ -->
+  <ItemGroup>
+    <Content Include="..\..\guest\init-data.sh"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="guest\init-data.sh" />
+    <Content Include="..\..\guest\recover.sh"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="guest\recover.sh" />
+    <Content Include="..\..\guest\provision-done.sh"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="guest\provision-done.sh" />
+    <Content Include="..\..\build\cloud-init\user-data"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="cloud-init\user-data" />
   </ItemGroup>
 </Project>

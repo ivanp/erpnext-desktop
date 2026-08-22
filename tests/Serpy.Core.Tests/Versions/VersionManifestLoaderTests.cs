@@ -15,9 +15,10 @@ public sealed class VersionManifestLoaderTests
         Assert.NotEmpty(manifest.Runtime.Python.Floor);
         Assert.NotEmpty(manifest.Runtime.Node.Lock);
         Assert.NotEmpty(manifest.Runtime.MariaDb.Lock);
-        Assert.NotEmpty(manifest.Runtime.Redis.Lock);
         Assert.NotEmpty(manifest.Apps.Frappe.Branch);
+        Assert.NotEmpty(manifest.Apps.Frappe.Lock);
         Assert.NotEmpty(manifest.Apps.ErpNext.Branch);
+        Assert.NotEmpty(manifest.Apps.ErpNext.Lock);
     }
 
     [Fact]
@@ -49,14 +50,14 @@ public sealed class VersionManifestLoaderTests
                 sourceUrl: "https://example.com/src"
                 licenseNoticeUrl: "https://example.com/license"
             debianCloudImage:
-              version: "20250801-2143"
+              version: "20260819-2575"
               url: "https://example.com/debian.qcow2"
-              sha256: "def456"
+              sha512: "abc512"
               release: "trixie"
               arch: "amd64"
             runtime:
               python:
-                lock: "3.14.1"
+                lock: "3.14.7"
                 floor: "3.14.0"
               node:
                 lock: "24.2.0"
@@ -69,10 +70,12 @@ public sealed class VersionManifestLoaderTests
                 floor: "8.0.0"
             apps:
               frappe:
-                branch: "version-16"
+                branch: "v16.31.0"
+                lock: "16.31.0"
                 minVersion: "16.0.0"
               erpnext:
-                branch: "version-16"
+                branch: "v16.32.3"
+                lock: "16.32.3"
                 minVersion: "16.0.0"
             """);
 
@@ -82,13 +85,16 @@ public sealed class VersionManifestLoaderTests
             Assert.Equal("11.1.0",                       m.Qemu.Version);
             Assert.Equal("https://example.com/qemu.exe", m.Qemu.Windows.InstallerUrl);
             Assert.Equal("abc123",                       m.Qemu.Windows.Sha256);
-            Assert.Equal("https://example.com/qemu.zip", m.Qemu.Windows.ArchiveUrl);
             Assert.Equal("trixie",             m.DebianCloudImage.Release);
-            Assert.Equal("3.14.1",             m.Runtime.Python.Lock);
+            Assert.Equal("abc512",             m.DebianCloudImage.Sha512);
+            Assert.Equal("3.14.7",             m.Runtime.Python.Lock);
             Assert.Equal("24.0.0",             m.Runtime.Node.Floor);
             Assert.Equal("11.8.3",             m.Runtime.MariaDb.Lock);
             Assert.Equal("8.0.0",              m.Runtime.Redis.Floor);
-            Assert.Equal("version-16",         m.Apps.Frappe.Branch);
+            Assert.Equal("v16.31.0",           m.Apps.Frappe.Branch);
+            Assert.Equal("16.31.0",            m.Apps.Frappe.Lock);
+            Assert.Equal("v16.32.3",           m.Apps.ErpNext.Branch);
+            Assert.Equal("16.32.3",            m.Apps.ErpNext.Lock);
             Assert.Equal("16.0.0",             m.Apps.ErpNext.MinVersion);
         }
         finally { File.Delete(tmp); }

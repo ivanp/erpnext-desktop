@@ -5,6 +5,7 @@ using Serpy.Core.Coordination;
 using Serpy.Core.Images;
 using Serpy.Core.Protocols;
 using Serpy.Core.Protocols.Qga;
+using Serpy.Core.Protocols.Qmp;
 using Serpy.Core.Qemu;
 using Serpy.Core.Versions;
 
@@ -78,6 +79,7 @@ public sealed class BuildOperation(
             var accel      = AcceleratorPolicy.Resolve();
 
             int serialPort = EphemeralPort.Allocate();
+            int qmpPort    = EphemeralPort.Allocate();
             int qgaPort    = EphemeralPort.Allocate();
 
             var args = new QemuArguments()
@@ -88,9 +90,13 @@ public sealed class BuildOperation(
                 .SystemDisk(StagingPath).Cdrom(SeedIsoPath)
                 .UserNetWithPortForward(settings.ErpNextPort)
                 .TlsCredsX509("tls-serial", certStore.QemuCertDir)
+                .TlsCredsX509("tls-qmp",    certStore.QemuCertDir)
                 .TlsCredsX509("tls-qga",    certStore.QemuCertDir)
                 .TlsChardev("serial0", serialPort, "tls-serial")
+                .SerialOnChardev("serial0")
+                .TlsChardev("qmp0",    qmpPort,    "tls-qmp")
                 .TlsChardev("qga0",    qgaPort,    "tls-qga")
+                .QmpOnChardev("qmp0")
                 .VirtioSerialDevice().QgaVirtioPort("qga0");
 
             // 5. Boot
@@ -124,7 +130,8 @@ public sealed class BuildOperation(
             var versions = await QueryVersionsAsync(qga, ct);
             Report("version-gate",
                 $"python={versions.Python} node={versions.Node} " +
-                $"mariadb={versions.MariaDb} redis={versions.Redis}", 88);
+                $"mariadb={versions.MariaDb} redis={versions.Redis} " +
+                $"frappe={versions.Frappe} erpnext={versions.ErpNext}", 88);
 
             try { VersionGate.Validate(versions, manifest); }
             catch (VersionGateException ex)
@@ -136,24 +143,30 @@ public sealed class BuildOperation(
                     $"locked={ex.Locked} floor={ex.Floor}", logPath);
             }
 
-            // 8. Powerdown
-            Report("powerdown", "Powering down…", 95);
-            var exited = await proc.WaitForExitAsync(TimeSpan.FromMinutes(5), ct);
-            if (!exited) proc.Kill();
+            // 8. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
+            Report("powerdown", "Sending graceful powerdown via QMP…", 95);
+            await using var qmp = await QmpClient.ConnectAsync(
+                "127.0.0.1", qmpPort, clientCert, caCert, ct);
+            await qmp.SendPowerdownAsync(ct);
+            if (!await qmp.WaitForShutdownEventAsync(TimeSpan.FromMinutes(3), ct))
+                proc.Kill();
+            if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
+                proc.Kill();
 
-            // 9. Acceptance manifest + atomic rename
+            // 9. Atomic image rename, then attest to the final exact bytes.
             Report("finalize", "Finalizing system image…", 98);
+            if (File.Exists(FinalPath)) File.Delete(FinalPath);
+            File.Move(StagingPath, FinalPath);
+
             var accepted = new SystemImageManifest
             {
                 BuildTimestamp = DateTimeOffset.UtcNow,
+                ImageSha256 = ComputeSha256(FinalPath),
                 Versions = versions,
             };
             File.WriteAllText(ManifestPath,
                 JsonSerializer.Serialize(accepted,
                     ApplianceStateJsonContext.Default.SystemImageManifest));
-
-            if (File.Exists(FinalPath)) File.Delete(FinalPath);
-            File.Move(StagingPath, FinalPath);
 
             Report("done",
                 $"system.qcow2 built. Python={versions.Python} " +
@@ -180,16 +193,35 @@ public sealed class BuildOperation(
     private static async Task<GuestVersionReport> QueryVersionsAsync(
         QgaClient qga, CancellationToken ct)
     {
-        Task<string> Run(string cmd, string[] a) =>
-            qga.ExecAsync(cmd, a, ct: ct).ContinueWith(t => t.Result.Stdout.Trim(), ct);
+        async Task<string> Run(string cmd, string[] args)
+        {
+            var result = await qga.ExecAsync(cmd, args, ct: ct);
+            if (!result.Succeeded)
+                throw new InvalidOperationException(
+                    $"Version query failed: {cmd} exit={result.ExitCode}: {result.Stderr}");
+            return result.Stdout.Trim();
+        }
+
+        var benchOutput = await Run("su", ["-", "frappe", "-c",
+            "cd /home/frappe/frappe-bench && bench version"]);
+        var apps = BenchVersionParser.ParseRequired(benchOutput);
 
         return new GuestVersionReport
         {
-            Python  = await Run("python3", ["--version"]),
-            Node    = await Run("node",    ["--version"]),
+            Python  = await Run("python3.14", ["--version"]),
+            Node    = await Run("node", ["--version"]),
             MariaDb = await Run("mariadb", ["--version"]),
             Redis   = await Run("redis-server", ["--version"]),
+            Frappe  = apps.Frappe,
+            ErpNext = apps.ErpNext,
         };
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(sha.ComputeHash(stream));
     }
 
     private static async Task KillAndClean(QemuProcess proc, CancellationToken ct)

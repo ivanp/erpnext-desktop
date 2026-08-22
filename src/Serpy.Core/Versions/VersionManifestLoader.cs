@@ -98,7 +98,7 @@ public static class VersionManifestLoader
             {
                 Version = Get("debiancloudimage.version"),
                 Url = Get("debiancloudimage.url"),
-                Sha256 = Get("debiancloudimage.sha256"),
+                Sha512 = Get("debiancloudimage.sha512"),
                 Release = Get("debiancloudimage.release"),
                 Arch = Get("debiancloudimage.arch"),
             },
@@ -116,9 +116,9 @@ public static class VersionManifestLoader
             Apps = new VersionManifest.AppsSection
             {
                 Frappe = new VersionManifest.AppEntry
-                    { Branch = Get("apps.frappe.branch"), MinVersion = Get("apps.frappe.minversion") },
+                    { Branch = Get("apps.frappe.branch"), Lock = Get("apps.frappe.lock"), MinVersion = Get("apps.frappe.minversion") },
                 ErpNext = new VersionManifest.AppEntry
-                    { Branch = Get("apps.erpnext.branch"), MinVersion = Get("apps.erpnext.minversion") },
+                    { Branch = Get("apps.erpnext.branch"), Lock = Get("apps.erpnext.lock"), MinVersion = Get("apps.erpnext.minversion") },
             },
         };
     }

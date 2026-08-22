@@ -71,6 +71,10 @@ public sealed class QemuArguments
             $"socket,id={chardevId},host=127.0.0.1,port={port}," +
             $"server=on,wait=off,tls-creds={tlsCredsId}");
 
+    /// <summary>Attach a chardev to the guest's first UART (/dev/ttyS0).</summary>
+    public QemuArguments SerialOnChardev(string chardevId) =>
+        Add("-serial", $"chardev:{chardevId}");
+
     // ── QMP monitor ───────────────────────────────────────────────────────
 
     public QemuArguments QmpOnChardev(string chardevId) =>
