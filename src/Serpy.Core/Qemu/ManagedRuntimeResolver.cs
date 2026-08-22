@@ -151,16 +151,22 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         }
     }
 
+    /// <summary>
+    /// Constructs NSIS silent-install arguments. /D must be the final argument
+    /// and its value must not be quoted, including when the path contains spaces.
+    /// </summary>
+    public static string BuildNsisArguments(string targetDir) =>
+        $"/S /D={targetDir}";
+
     private static void RunNsisInstall(string installerPath, string targetDir)
     {
         // NSIS silent install: /S suppresses UI, /D= sets target directory.
-        // /D= must be the LAST argument and must NOT be quoted.
-        // UseShellExecute=true + Verb="runas" triggers UAC elevation.
+        // /D= is the final argument. UseShellExecute + runas triggers UAC elevation.
         var psi = new ProcessStartInfo(installerPath)
         {
             UseShellExecute = true,
             Verb = "runas",
-            Arguments = $"/S /D={targetDir}",
+            Arguments = BuildNsisArguments(targetDir),
         };
 
         using var proc = Process.Start(psi)

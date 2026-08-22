@@ -203,10 +203,43 @@ public sealed class RecoverySwapStateTests
     }
 
     [Fact]
-    public void ReplacementPresentWithBackupBeforeJournalUpdate_IsDetectedAsCompletedCopy()
+    public void JournalledSwapWithSystemMissing_BypassesInstalledImageValidation()
+    {
+        Assert.True(RecoverOperation.IsInterruptedSwapAwaitingCopy(
+            journalTargetsReplacement: true,
+            systemImageExists: false,
+            backupImageExists: true,
+            diskSwapped: false));
+    }
+
+    [Fact]
+    public void UnjournalledMissingSystem_DoesNotBypassInstalledImageValidation()
+    {
+        Assert.False(RecoverOperation.IsInterruptedSwapAwaitingCopy(
+            journalTargetsReplacement: false,
+            systemImageExists: false,
+            backupImageExists: true,
+            diskSwapped: false));
+    }
+
+    [Fact]
+    public void DistinctReplacementPresentWithBackupBeforeJournalUpdate_IsDetectedAsCompletedCopy()
     {
         Assert.True(RecoverOperation.IsCompletedCopyAwaitingJournal(
-            systemMatchesReplacement: true,
+            currentImageSha256: "replacement-digest",
+            replacementImageSha256: "replacement-digest",
+            originalImageSha256: "original-digest",
+            backupImageExists: true,
+            diskSwapped: false));
+    }
+
+    [Fact]
+    public void DuplicateReplacementWithBackupBeforeJournalUpdate_IsNotTreatedAsCompletedCopy()
+    {
+        Assert.False(RecoverOperation.IsCompletedCopyAwaitingJournal(
+            currentImageSha256: "same-digest",
+            replacementImageSha256: "same-digest",
+            originalImageSha256: "same-digest",
             backupImageExists: true,
             diskSwapped: false));
     }
@@ -215,7 +248,9 @@ public sealed class RecoverySwapStateTests
     public void UnrecognizedSystemWithBackup_IsNotDetectedAsCompletedCopy()
     {
         Assert.False(RecoverOperation.IsCompletedCopyAwaitingJournal(
-            systemMatchesReplacement: false,
+            currentImageSha256: "unknown-digest",
+            replacementImageSha256: "replacement-digest",
+            originalImageSha256: "original-digest",
             backupImageExists: true,
             diskSwapped: false));
     }

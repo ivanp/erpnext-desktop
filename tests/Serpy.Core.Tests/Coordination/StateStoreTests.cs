@@ -45,6 +45,23 @@ public sealed class StateStoreTests : IDisposable
     }
 
     [Fact]
+    public void Write_ThenRead_PreservesRecoverySourceImageIdentity()
+    {
+        var store = MakeStore();
+        store.Write(new ApplianceState
+        {
+            RecoveryJournal = new RecoveryJournal
+            {
+                TargetImagePath = "C:\\replacement.qcow2",
+                SourceImageSha256 = "AABBCC",
+            },
+        });
+
+        var journal = Assert.IsType<RecoveryJournal>(store.Read().RecoveryJournal);
+        Assert.Equal("AABBCC", journal.SourceImageSha256);
+    }
+
+    [Fact]
     public void Read_CorruptJson_ReturnsNotBuilt_NoThrow()
     {
         Directory.CreateDirectory(_dir);

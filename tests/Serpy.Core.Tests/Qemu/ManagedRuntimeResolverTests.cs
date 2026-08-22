@@ -120,6 +120,15 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         Assert.Contains("sha256", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void BuildNsisArguments_UsesFinalUnquotedDestination()
+    {
+        Assert.Equal(
+            "/S /D=C:\\Users\\Test User\\AppData\\Local\\Serpy\\runtime\\staging",
+            ManagedRuntimeResolver.BuildNsisArguments(
+                "C:\\Users\\Test User\\AppData\\Local\\Serpy\\runtime\\staging"));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     // Reflection-free access to private static methods via delegate wrappers.

@@ -96,13 +96,27 @@ public sealed class RecoverOperation(
         var state = stateStore.Read();
         var journalTargetsReplacement = state.RecoveryJournal is { TargetImagePath: var target } &&
             string.Equals(target, replacementImagePath, StringComparison.Ordinal);
-        var currentMatchesReplacement = newManifest.MatchesImageDigest(SystemImagePath);
+        var systemImageExists = File.Exists(SystemImagePath);
         var backupExists = File.Exists(SystemBackupPath);
+        var interruptedSwapAwaitingCopy = IsInterruptedSwapAwaitingCopy(
+            journalTargetsReplacement, systemImageExists, backupExists,
+            state.RecoveryJournal?.DiskSwapped ?? false);
+        var currentMatchesReplacement = newManifest.MatchesImageDigest(SystemImagePath);
         var postCopyBeforeJournal = journalTargetsReplacement &&
-            IsCompletedCopyAwaitingJournal(currentMatchesReplacement, backupExists,
-                state.RecoveryJournal!.DiskSwapped);
+            IsCompletedCopyAwaitingJournal(
+                currentImageSha256: newManifest.ImageSha256,
+                replacementImageSha256: newManifest.ImageSha256,
+                originalImageSha256: state.RecoveryJournal!.SourceImageSha256,
+                backupImageExists: backupExists,
+                diskSwapped: state.RecoveryJournal.DiskSwapped) &&
+            currentMatchesReplacement;
 
-        if (journalTargetsReplacement && (state.RecoveryJournal!.DiskSwapped || postCopyBeforeJournal))
+        if (interruptedSwapAwaitingCopy)
+        {
+            // The source move completed but the replacement copy did not. The durable
+            // journal authenticates the state; step 4 copies the validated replacement.
+        }
+        else if (journalTargetsReplacement && (state.RecoveryJournal!.DiskSwapped || postCopyBeforeJournal))
         {
             if (!currentMatchesReplacement)
                 return Fail(operationId,
@@ -146,10 +160,15 @@ public sealed class RecoverOperation(
                     $"An incomplete recovery for a different image is in progress " +
                     $"({j.TargetImagePath}). Finish or clear it before starting a new one.", logPath);
 
+            var installedAcceptancePath = Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
+            var installedManifest = JsonSerializer.Deserialize(
+                File.ReadAllText(installedAcceptancePath),
+                ApplianceStateJsonContext.Default.SystemImageManifest)!;
             Report("journal", "Writing recovery journal…", 10);
             stateStore.Mutate(s => s.RecoveryJournal = new RecoveryJournal
             {
                 TargetImagePath      = replacementImagePath,
+                SourceImageSha256    = installedManifest.ImageSha256,
                 TargetMariaDbVersion = newManifest.Versions.MariaDb,
                 // Use actual Frappe version from the acceptance manifest (not a Python proxy).
                 TargetFrappeVersion  = newManifest.Versions.Frappe,
@@ -303,8 +322,18 @@ public sealed class RecoverOperation(
         !systemImageExists && backupImageExists;
 
     public static bool IsCompletedCopyAwaitingJournal(
-        bool systemMatchesReplacement, bool backupImageExists, bool diskSwapped) =>
-        !diskSwapped && systemMatchesReplacement && backupImageExists;
+        string currentImageSha256, string replacementImageSha256, string originalImageSha256,
+        bool backupImageExists, bool diskSwapped) =>
+        !diskSwapped && backupImageExists &&
+        !string.IsNullOrWhiteSpace(originalImageSha256) &&
+        !string.Equals(originalImageSha256, replacementImageSha256, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(currentImageSha256, replacementImageSha256, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsInterruptedSwapAwaitingCopy(
+        bool journalTargetsReplacement, bool systemImageExists,
+        bool backupImageExists, bool diskSwapped) =>
+        journalTargetsReplacement && !diskSwapped &&
+        IsSwapInProgress(systemImageExists, backupImageExists);
 
     private static OperationResult Fail(Guid id, string msg, string log) =>
         new(id, OperationKind.Recover, OperationOutcome.Failure, msg, log);

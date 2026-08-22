@@ -90,6 +90,10 @@ public sealed class RecoveryJournal
     [JsonPropertyName("targetImagePath")]
     public string TargetImagePath { get; set; } = string.Empty;
 
+    /// <summary>SHA-256 of the accepted system image before the replacement swap.</summary>
+    [JsonPropertyName("sourceImageSha256")]
+    public string SourceImageSha256 { get; set; } = string.Empty;
+
     [JsonPropertyName("targetMariaDbVersion")]
     public string TargetMariaDbVersion { get; set; } = string.Empty;
 
