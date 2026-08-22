@@ -57,6 +57,10 @@ public sealed class RecoverOperation(
         if (!File.Exists(replacementImagePath))
             return Fail(operationId, $"Replacement image not found: {replacementImagePath}", logPath);
 
+        if (IsCurrentSystemImageReplacement(SystemImagePath, replacementImagePath))
+            return Fail(operationId,
+                "Replacement image must be a distinct file from the current system image.", logPath);
+
         var acceptancePath = Path.Combine(
             Path.GetDirectoryName(replacementImagePath)!,
             SystemImageManifest.FileName);
@@ -319,6 +323,13 @@ public sealed class RecoverOperation(
 
     public static bool IsSwapInProgress(bool systemImageExists, bool backupImageExists) =>
         !systemImageExists && backupImageExists;
+
+    public static bool IsCurrentSystemImageReplacement(
+        string currentSystemImagePath, string replacementImagePath) =>
+        string.Equals(
+            Path.GetFullPath(currentSystemImagePath),
+            Path.GetFullPath(replacementImagePath),
+            StringComparison.OrdinalIgnoreCase);
 
     public static bool IsCompletedCopyAwaitingJournal(
         bool currentMatchesReplacement, string originalImageSha256,

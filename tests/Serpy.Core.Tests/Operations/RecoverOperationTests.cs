@@ -203,6 +203,22 @@ public sealed class RecoverySwapStateTests
     }
 
     [Fact]
+    public void CurrentSystemImage_IsRejectedAsRecoveryReplacement()
+    {
+        Assert.True(RecoverOperation.IsCurrentSystemImageReplacement(
+            "C:\\Users\\Test\\AppData\\Local\\Serpy\\appliance\\system.qcow2",
+            "C:\\Users\\Test\\AppData\\Local\\Serpy\\appliance\\SYSTEM.qcow2"));
+    }
+
+    [Fact]
+    public void DifferentImage_IsNotRejectedAsCurrentSystemImage()
+    {
+        Assert.False(RecoverOperation.IsCurrentSystemImageReplacement(
+            "C:\\Users\\Test\\AppData\\Local\\Serpy\\appliance\\system.qcow2",
+            "C:\\Users\\Test\\Downloads\\replacement.qcow2"));
+    }
+
+    [Fact]
     public void JournalledSwapWithSystemMissing_BypassesInstalledImageValidation()
     {
         Assert.True(RecoverOperation.IsInterruptedSwapAwaitingCopy(
