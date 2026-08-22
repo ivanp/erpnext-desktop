@@ -20,13 +20,13 @@ namespace Serpy.Windows.IntegrationTests;
 /// keeps xUnit's scheduler out of the shared KnownPaths/StateStore/QEMU-PID space.
 /// </summary>
 [CollectionDefinition(nameof(ApplianceWorkflow), DisableParallelization = true)]
-public sealed class ApplianceWorkflow { }
+public sealed class ApplianceWorkflow : ICollectionFixture<ApplianceWorkflowFixture> { }
 
 /// <summary>
-/// Shared fixture: builds the composition root once per collection run and
-/// validates the required environment before any test runs.
-/// Fails setup immediately when SERPY_ADMIN_PASSWORD is absent/blank so every
-/// test in the collection receives a clear error rather than a silent empty-credential run.
+/// Shared fixture: composes the real service once for the serialized appliance
+/// collection. In clean-workflow mode it completes Build → Initialize before
+/// any AE3/AE5 test is scheduled; otherwise it rejects an uninitialized
+/// workspace rather than allowing an order-dependent test failure.
 /// </summary>
 public sealed class ApplianceWorkflowFixture : IAsyncLifetime
 {
@@ -42,6 +42,9 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
     public IApplianceService Service { get; private set; } = null!;
     public StateStore StateStore { get; private set; } = null!;
     public string ErpNextUrl => $"http://127.0.0.1:{ErpNextPort}";
+
+    private static bool IsCleanWorkflow =>
+        Environment.GetEnvironmentVariable("SERPY_RUN_CLEAN_WORKFLOW") == "1";
 
     public async Task InitializeAsync()
     {
@@ -80,16 +83,84 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
         await resolver.EnsureInstalledAsync(
             new Progress<string>(m => Console.WriteLine($"[resolver] {m}")));
 
+        var cloudInitDir = FindCloudInitDir();
         Service = new ApplianceService(
             resolver, certStore, imageTool,
             new BaseImageDownloader(manifest),
             new NoCloudSeedWriter(
-                NoCloudSeedWriter.RenderUserData(string.Empty, string.Empty, string.Empty, string.Empty),
-                string.Empty),
+                NoCloudSeedWriter.RenderUserData(
+                    File.ReadAllText(Path.Combine(cloudInitDir, "user-data")),
+                    File.ReadAllText(FindGuestHelper("provision-done.sh")),
+                    File.ReadAllText(FindGuestHelper("init-data.sh")),
+                    File.ReadAllText(FindGuestHelper("recover.sh"))),
+                File.ReadAllText(Path.Combine(cloudInitDir, "meta-data"))),
             healthCreds, StateStore, manifest, settings);
+
+        await EnsureInitializedWorkspaceAsync();
+    }
+
+    private async Task EnsureInitializedWorkspaceAsync()
+    {
+        if (IsCleanWorkflow)
+        {
+            Directory.CreateDirectory(KnownPaths.ApplianceDir);
+            if (Directory.EnumerateFileSystemEntries(KnownPaths.ApplianceDir).Any())
+                throw new InvalidOperationException(
+                    $"SERPY_RUN_CLEAN_WORKFLOW=1 requires an empty appliance workspace: {KnownPaths.ApplianceDir}");
+
+            var progress = new Progress<OperationUpdate>(u => Console.WriteLine($"[{u.Stage}] {u.Message}"));
+            using var cts = new CancellationTokenSource(TimeSpan.FromHours(3));
+            var build = await Service.BuildAsync(progress, cts.Token);
+            if (build.Outcome != OperationOutcome.Success)
+                throw new InvalidOperationException($"Clean workflow Build failed: {build.Message}");
+
+            var init = await Service.InitializeAsync(
+                new InitializationParameters(SiteName, AdminPassword), progress, cts.Token);
+            if (init.Outcome != OperationOutcome.Success)
+                throw new InvalidOperationException($"Clean workflow Initialize failed: {init.Message}");
+        }
+
+        var state = StateStore.Read();
+        if (state.Readiness != ReadinessState.Initialized ||
+            !File.Exists(Path.Combine(KnownPaths.ApplianceDir, "system.qcow2")) ||
+            !File.Exists(Path.Combine(KnownPaths.ApplianceDir, "data.img")))
+        {
+            throw new InvalidOperationException(
+                "Appliance workflow tests require a provisioned initialized workspace " +
+                "(system.qcow2 + data.img), or set SERPY_RUN_CLEAN_WORKFLOW=1 for a clean Build → Initialize run.");
+        }
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
+
+    private static string FindGuestHelper(string name)
+    {
+        foreach (var root in FindRepositoryRoots())
+        {
+            var path = Path.Combine(root, "guest", name);
+            if (File.Exists(path)) return path;
+        }
+
+        throw new FileNotFoundException($"Guest helper not found: {name}");
+    }
+
+    private static string FindCloudInitDir()
+    {
+        foreach (var root in FindRepositoryRoots())
+        {
+            var path = Path.Combine(root, "build", "cloud-init");
+            if (Directory.Exists(path)) return path;
+        }
+
+        throw new DirectoryNotFoundException("build/cloud-init was not found from the test output directory.");
+    }
+
+    private static IEnumerable<string> FindRepositoryRoots()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "Serpy.slnx")))
+                yield return dir.FullName;
+    }
 
     // ── Shared REST helpers ───────────────────────────────────────────────────
 
@@ -149,7 +220,6 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
 /// </summary>
 [Collection(nameof(ApplianceWorkflow))]
 public sealed class PersistenceTests(ApplianceWorkflowFixture fx)
-    : IClassFixture<ApplianceWorkflowFixture>
 {
     private static bool ShouldRun =>
         Environment.GetEnvironmentVariable("SERPY_RUN_APPLIANCE") == "1";
@@ -217,7 +287,6 @@ public sealed class PersistenceTests(ApplianceWorkflowFixture fx)
 /// </summary>
 [Collection(nameof(ApplianceWorkflow))]
 public sealed class DurabilityTests(ApplianceWorkflowFixture fx)
-    : IClassFixture<ApplianceWorkflowFixture>
 {
     private static bool ShouldRun =>
         Environment.GetEnvironmentVariable("SERPY_RUN_APPLIANCE") == "1";

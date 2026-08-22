@@ -1,6 +1,10 @@
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
+using Serpy.Core.Guest;
+using Serpy.Core.Health;
+using Serpy.Core.Images;
+using Serpy.Core.Protocols.Qga;
 using Serpy.Core.Protocols.Qmp;
 using Serpy.Core.Qemu;
 
@@ -20,6 +24,7 @@ namespace Serpy.Core.Operations;
 public sealed class StartOperation(
     ManagedRuntimeResolver runtimeResolver,
     TlsCertificateStore certStore,
+    HealthCredentials healthCredentials,
     StateStore stateStore,
     ApplianceSettings settings)
 {
@@ -60,6 +65,12 @@ public sealed class StartOperation(
         if (state.Readiness != ReadinessState.Initialized)
             return Fail(operationId,
                 $"Cannot start: readiness is {state.Readiness}. Build and Initialize first.",
+                logPath);
+
+        var systemImagePath = state.SystemImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
+        if (!SystemImageManifest.IsAccepted(systemImagePath))
+            return Fail(operationId,
+                "System image is missing a valid Serpy acceptance manifest. Build or recover before starting.",
                 logPath);
 
         // Preflight: WHPX probe.
@@ -140,13 +151,52 @@ public sealed class StartOperation(
                 return await AbortStartAsync(proc, operationId,
                     "QMP query-status returned no response.", logPath);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return await CancelStartAsync(proc, operationId, logPath);
+        }
+        catch (Exception ex)
         {
             return await AbortStartAsync(proc, operationId,
                 $"QMP connection failed: {ex.Message}", logPath);
         }
-
         var loopbackUrl = $"http://127.0.0.1:{settings.ErpNextPort}";
+        Report("health", "Waiting for ERPNext functional health…", 60);
+        try
+        {
+            var credentials = healthCredentials.Retrieve();
+            var siteName = credentials?.SiteName ?? "site1.local";
+            var health = await WaitForHealthyAsync(async token =>
+            {
+                try
+                {
+                    await using var qga = await QgaClient.ConnectAsync(
+                        "127.0.0.1", qgaPort, clientCert, caCert, token);
+                    return await new HealthChecker(
+                        new GuestOperations(qga), siteName, loopbackUrl, healthCredentials).RunAsync(token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return HealthResult.Fail($"Guest agent is not ready: {ex.Message}", "guest-agent");
+                }
+            }, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(2), ct);
+            if (!health.Healthy)
+                return await AbortStartAsync(proc, operationId,
+                    $"Functional health check failed [{health.FailedCheck}]: {health.Reason}", logPath);
+        }
+        catch (OperationCanceledException)
+        {
+            return await CancelStartAsync(proc, operationId, logPath);
+        }
+        catch (Exception ex)
+        {
+            return await AbortStartAsync(proc, operationId,
+                $"Functional health check failed: {ex.Message}", logPath);
+        }
         stateStore.Mutate(s =>
         {
             s.Health          = HealthState.Running;
@@ -159,6 +209,52 @@ public sealed class StartOperation(
         Report("running", $"Appliance running at {loopbackUrl}", 100);
         return new OperationResult(operationId, OperationKind.Start,
             OperationOutcome.Success, $"Started at {loopbackUrl}", logPath);
+    }
+
+    /// <summary>Polls the full R11 health contract until healthy or deadline.</summary>
+    public static async Task<HealthResult> WaitForHealthyAsync(
+        Func<CancellationToken, Task<HealthResult>> check,
+        TimeSpan timeout,
+        TimeSpan retryDelay,
+        CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        var last = HealthResult.Fail("Timed out before functional health completed", "health");
+        do
+        {
+            ct.ThrowIfCancellationRequested();
+            last = await check(ct);
+            if (last.Healthy) return last;
+            if (retryDelay > TimeSpan.Zero && DateTime.UtcNow < deadline)
+                await Task.Delay(retryDelay, ct);
+        }
+        while (DateTime.UtcNow < deadline);
+
+        return last;
+    }
+
+    /// <summary>Stops a spawned VM and clears the durable in-progress record.</summary>
+    public static void RecordCancelledStart(StateStore stateStore) =>
+        stateStore.Mutate(s =>
+        {
+            s.Health = HealthState.Stopped;
+            s.QemuPid = null;
+            s.QemuStartTimeTicks = null;
+            s.QmpPort = null;
+            s.QgaPort = null;
+            s.SerialPort = null;
+            s.LoopbackUrl = null;
+            s.ActiveOperation = null;
+        });
+
+    private async Task<OperationResult> CancelStartAsync(
+        QemuProcess proc, Guid id, string log)
+    {
+        try { proc.Kill(); await proc.WaitForExitAsync(TimeSpan.FromSeconds(10)); }
+        catch { /* best-effort cleanup after user cancellation */ }
+        RecordCancelledStart(stateStore);
+        return new OperationResult(id, OperationKind.Start, OperationOutcome.Cancelled,
+            "Start cancelled.", log);
     }
 
     private async Task<OperationResult> AbortStartAsync(

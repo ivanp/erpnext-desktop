@@ -151,3 +151,90 @@ public sealed class ApplianceServiceContractTests : IDisposable
         Assert.NotEqual(ReadinessState.Initialized, status.Readiness);
     }
 }
+
+public sealed class ApplianceServicePreconditionTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyServicePrecondition-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
+    }
+
+    [Fact]
+    public async Task BuildAsync_InitializedAppliance_RefusesReplacementOutsideRecover()
+    {
+        var service = CreateService(ReadinessState.Initialized);
+
+        var result = await service.BuildAsync(NoProgress());
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Contains("recover", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_NotBuiltAppliance_RefusesBeforeCreatingDataDisk()
+    {
+        var service = CreateService(ReadinessState.NotBuilt);
+
+        var result = await service.InitializeAsync(
+            new InitializationParameters("site1.local", "secret"), NoProgress());
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Contains("build", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ApplianceService CreateService(ReadinessState readiness)
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s => s.Readiness = readiness);
+        return new ApplianceService(
+            null!, null!, null!, null!, null!, null!, store, null!, null!);
+    }
+
+    private static IProgress<OperationUpdate> NoProgress() => new Progress<OperationUpdate>();
+}
+
+public sealed class ApplianceServiceBuildReadinessTests
+{
+    [Fact]
+    public void CanBuildFrom_BuiltWithoutCommittedData_AllowsRetry()
+    {
+        var state = new ApplianceState { Readiness = ReadinessState.Built };
+
+        Assert.True(ApplianceService.CanBuildFrom(state, committedDataExists: false));
+    }
+
+    [Fact]
+    public void CanBuildFrom_NotBuiltWithStateDataPath_RejectsOverwritingPersistentData()
+    {
+        var state = new ApplianceState
+        {
+            Readiness = ReadinessState.NotBuilt,
+            DataImagePath = "C:\\Serpy\\appliance\\data.img",
+        };
+
+        Assert.False(ApplianceService.CanBuildFrom(state, committedDataExists: false));
+    }
+
+    [Fact]
+    public void CanBuildFrom_NotBuiltWithCommittedDataOnDisk_RejectsOverwritingPersistentData()
+    {
+        var state = new ApplianceState { Readiness = ReadinessState.NotBuilt };
+
+        Assert.False(ApplianceService.CanBuildFrom(state, committedDataExists: true));
+    }
+
+    [Fact]
+    public void CanBuildFrom_InitializedWithData_RejectsReplacementOutsideRecover()
+    {
+        var state = new ApplianceState
+        {
+            Readiness = ReadinessState.Initialized,
+            DataImagePath = "C:\\Serpy\\appliance\\data.img",
+        };
+
+        Assert.False(ApplianceService.CanBuildFrom(state, committedDataExists: false));
+    }
+}

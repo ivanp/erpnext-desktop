@@ -33,6 +33,7 @@ public sealed class BuildOperation(
     QemuImageTool imageTool,
     ManagedRuntimeResolver runtimeResolver,
     TlsCertificateStore certStore,
+    StateStore stateStore,
     VersionManifest manifest,
     ApplianceSettings settings)
 {
@@ -168,6 +169,8 @@ public sealed class BuildOperation(
                 JsonSerializer.Serialize(accepted,
                     ApplianceStateJsonContext.Default.SystemImageManifest));
 
+            RecordAcceptedBuild(stateStore, FinalPath);
+
             Report("done",
                 $"system.qcow2 built. Python={versions.Python} " +
                 $"Node={versions.Node} MariaDB={versions.MariaDb} Redis={versions.Redis}", 100);
@@ -187,6 +190,28 @@ public sealed class BuildOperation(
             return Fail(operationId, $"Build failed: {ex.Message}", logPath);
         }
     }
+
+    /// <summary>
+    /// Publishes the durable lifecycle transition only after the final image and
+    /// its acceptance manifest have both been written (F1 → F2).
+    /// </summary>
+    public static void RecordAcceptedBuild(StateStore stateStore, string systemImagePath) =>
+        stateStore.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Built;
+            s.Health = HealthState.Stopped;
+            s.SystemImagePath = systemImagePath;
+            s.DataImagePath = null;
+            s.QemuPid = null;
+            s.QemuStartTimeTicks = null;
+            s.QmpPort = null;
+            s.QgaPort = null;
+            s.SerialPort = null;
+            s.LoopbackUrl = null;
+            s.ActiveOperation = null;
+            s.LogPath = null;
+            s.RecoveryJournal = null;
+        });
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 

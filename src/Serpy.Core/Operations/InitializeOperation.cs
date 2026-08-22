@@ -63,6 +63,11 @@ public sealed class InitializeOperation(
                 "Recover replaces the system image only; existing data is never silently overwritten.",
                 logPath);
 
+        if (!SystemImageManifest.IsAccepted(SystemImagePath))
+            return Fail(operationId,
+                "System image is missing a valid Serpy acceptance manifest. Build a verified system image before initialization.",
+                logPath);
+
         try
         {
             // 1. Create pending data disk.

@@ -17,6 +17,7 @@ namespace Serpy.Core.Operations;
 public sealed class ApplianceService : IApplianceService, IDisposable
 {
     private readonly LifecycleLock _lock;
+    private readonly StateStore _stateStore;
     private readonly StatusOperation _statusOp;
     private readonly BuildOperation _buildOp;
     private readonly InitializeOperation _initOp;
@@ -35,15 +36,17 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         VersionManifest manifest,
         ApplianceSettings settings)
     {
+        _stateStore = stateStore;
         _lock      = new LifecycleLock();
         _statusOp  = new StatusOperation(stateStore);
         _buildOp   = new BuildOperation(
             imageDownloader, seedWriter, imageTool,
-            runtimeResolver, certStore, manifest, settings);
+            runtimeResolver, certStore, stateStore, manifest, settings);
         _initOp    = new InitializeOperation(
             imageTool, runtimeResolver, certStore,
             healthCredentials, stateStore, settings);
-        _startOp   = new StartOperation(runtimeResolver, certStore, stateStore, settings);
+        _startOp   = new StartOperation(
+            runtimeResolver, certStore, healthCredentials, stateStore, settings);
         _stopOp    = new StopOperation(stateStore, certStore);
         _recoverOp = new RecoverOperation(
             imageTool, runtimeResolver, certStore,
@@ -61,7 +64,11 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         var lease = _lock.TryAcquire(TimeSpan.Zero);
         if (lease is null) return Busy(OperationKind.Build);
         using (lease)
+        {
+            if (!CanBuildFrom(_stateStore.Read(), HasCommittedDataOnDisk()))
+                return InvalidReadiness(OperationKind.Build, "not built or site-less built without persistent data", "Use Recover to replace an initialized system image.");
             return await _buildOp.ExecuteAsync(Guid.NewGuid(), progress, ct);
+        }
     }
 
     public async Task<OperationResult> InitializeAsync(
@@ -76,8 +83,12 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         var lease = _lock.TryAcquire(TimeSpan.Zero);
         if (lease is null) return Busy(OperationKind.Initialize);
         using (lease)
+        {
+            if (_stateStore.Read().Readiness != ReadinessState.Built)
+                return InvalidReadiness(OperationKind.Initialize, "built", "Build the system image before initialization.");
             return await _initOp.ExecuteAsync(
                 Guid.NewGuid(), parameters.SiteName, parameters.AdminPassword, progress, ct);
+        }
     }
 
     public async Task<OperationResult> StartAsync(
@@ -128,9 +139,26 @@ public sealed class ApplianceService : IApplianceService, IDisposable
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// A site-less accepted image may be rebuilt after a failed or abandoned init;
+    /// once data.img is committed, replacement must go through Recover.
+    /// </summary>
+    public static bool CanBuildFrom(ApplianceState state, bool committedDataExists) =>
+        (state.Readiness is ReadinessState.NotBuilt or ReadinessState.Built) &&
+        string.IsNullOrEmpty(state.DataImagePath) &&
+        !committedDataExists;
+
+    private static bool HasCommittedDataOnDisk() =>
+        File.Exists(Path.Combine(KnownPaths.ApplianceDir, "data.img")) ||
+        File.Exists(Path.Combine(KnownPaths.ApplianceDir, ".data-committed"));
+
     private static OperationResult Busy(OperationKind kind) =>
         new(Guid.NewGuid(), kind, OperationOutcome.Failure,
             "Another operation is already in progress. Wait for it to complete.");
+
+    private OperationResult InvalidReadiness(OperationKind kind, string required, string remediation) =>
+        new(Guid.NewGuid(), kind, OperationOutcome.Failure,
+            $"Cannot {kind.ToString().ToLowerInvariant()}: readiness must be {required}. {remediation}");
 
     public void Dispose() => _lock.Dispose();
 }

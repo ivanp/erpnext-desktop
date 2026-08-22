@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Serpy.Core.Coordination;
 using Serpy.Core.Versions;
 
 namespace Serpy.Core.Images;
@@ -33,5 +35,30 @@ public sealed class SystemImageManifest
         return string.Equals(
             Convert.ToHexString(sha.ComputeHash(stream)), ImageSha256,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Checks the adjacent acceptance manifest and its digest before a lifecycle
+    /// operation consumes a system image.
+    /// </summary>
+    public static bool IsAccepted(string systemImagePath)
+    {
+        var directory = Path.GetDirectoryName(systemImagePath);
+        if (string.IsNullOrEmpty(directory)) return false;
+
+        var manifestPath = Path.Combine(directory, FileName);
+        if (!File.Exists(manifestPath)) return false;
+
+        try
+        {
+            var manifest = JsonSerializer.Deserialize(
+                File.ReadAllText(manifestPath),
+                ApplianceStateJsonContext.Default.SystemImageManifest);
+            return manifest?.MatchesImageDigest(systemImagePath) == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }

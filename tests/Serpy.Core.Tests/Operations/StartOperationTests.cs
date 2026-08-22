@@ -73,6 +73,79 @@ public sealed class StartOperationGuardTests : IDisposable
     }
 }
 
+public sealed class StartHealthGateTests
+{
+    [Fact]
+    public async Task WaitForHealthyAsync_RetriesUntilFunctionalHealthSucceeds()
+    {
+        var attempts = 0;
+
+        var result = await StartOperation.WaitForHealthyAsync(
+            _ => Task.FromResult(++attempts < 3
+                ? Serpy.Core.Health.HealthResult.Fail("ERPNext is still booting", "auth")
+                : Serpy.Core.Health.HealthResult.Ok()),
+            TimeSpan.FromSeconds(1),
+            TimeSpan.Zero,
+            CancellationToken.None);
+
+        Assert.True(result.Healthy);
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task WaitForHealthyAsync_DeadlineReturnsLatestFunctionalFailure()
+    {
+        var result = await StartOperation.WaitForHealthyAsync(
+            _ => Task.FromResult(Serpy.Core.Health.HealthResult.Fail("Scheduler is not active", "scheduler")),
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            CancellationToken.None);
+
+        Assert.False(result.Healthy);
+        Assert.Equal("scheduler", result.FailedCheck);
+    }
+}
+
+public sealed class StartCancellationTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), $"SerpyStartCancel-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+
+    [Fact]
+    public void RecordCancelledStart_ClearsLiveProcessAndEndpointState()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = new StateStore(Path.Combine(_directory, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Health = HealthState.Starting;
+            s.QemuPid = 1234;
+            s.QemuStartTimeTicks = 5678;
+            s.QmpPort = 10001;
+            s.QgaPort = 10002;
+            s.SerialPort = 10003;
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+            s.ActiveOperation = OperationKind.Start;
+        });
+
+        StartOperation.RecordCancelledStart(store);
+
+        var state = store.Read();
+        Assert.Equal(HealthState.Stopped, state.Health);
+        Assert.Null(state.QemuPid);
+        Assert.Null(state.QemuStartTimeTicks);
+        Assert.Null(state.QmpPort);
+        Assert.Null(state.QgaPort);
+        Assert.Null(state.SerialPort);
+        Assert.Null(state.LoopbackUrl);
+        Assert.Null(state.ActiveOperation);
+    }
+}
+
 internal sealed class StartGuardDouble(StateStore stateStore)
 {
     public OperationResult? Check()

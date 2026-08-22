@@ -65,8 +65,56 @@ public sealed class SystemImageManifestTests : IDisposable
             installed, replacement, diskSwapped: true, replacementImage));
     }
 
+    [Fact]
+    public void AcceptedBuildState_RecordsBuiltReadinessAndSystemPath()
+    {
+        Directory.CreateDirectory(_directory);
+        var statePath = Path.Combine(_directory, "state.json");
+        var systemImage = Path.Combine(_directory, "system.qcow2");
+        var store = new Serpy.Core.Coordination.StateStore(statePath);
+
+        BuildOperation.RecordAcceptedBuild(store, systemImage);
+
+        var state = store.Read();
+        Assert.Equal(Contracts.ReadinessState.Built, state.Readiness);
+        Assert.Equal(Contracts.HealthState.Stopped, state.Health);
+        Assert.Equal(systemImage, state.SystemImagePath);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+}
+
+public sealed class SystemImagePreflightTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), $"SerpyPreflight-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+
+    [Fact]
+    public void VerifyAcceptedImage_MissingManifest_RejectsSystemImage()
+    {
+        Directory.CreateDirectory(_directory);
+        var image = Path.Combine(_directory, "system.qcow2");
+        File.WriteAllText(image, "unattested image");
+
+        Assert.False(SystemImageManifest.IsAccepted(image));
+    }
+
+    [Fact]
+    public void VerifyAcceptedImage_ManifestDigestMismatch_RejectsSystemImage()
+    {
+        Directory.CreateDirectory(_directory);
+        var image = Path.Combine(_directory, "system.qcow2");
+        File.WriteAllText(image, "changed image");
+        File.WriteAllText(Path.Combine(_directory, SystemImageManifest.FileName),
+            "{\"imageSha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}");
+
+        Assert.False(SystemImageManifest.IsAccepted(image));
     }
 }
