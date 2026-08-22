@@ -264,20 +264,19 @@ public sealed class DurabilityTests(ApplianceWorkflowFixture fx)
 
         Console.WriteLine($"[AE5] Hard-killed QEMU PID {pid}.");
 
-        // Reconcile state: StopOperation uses QMP, which is unavailable after a hard kill.
-        // Write the stopped state directly so StartAsync's preflight passes.
-        fx.StateStore.Mutate(s =>
-        {
-            s.Health     = HealthState.Stopped;
-            s.QemuPid    = null;
-            s.QmpPort    = null;
-            s.QgaPort    = null;
-            s.SerialPort = null;
-            s.LoopbackUrl = null;
-        });
+        // Allow Windows to release file handles after the kill before status check.
+        await Task.Delay(TimeSpan.FromSeconds(2));
 
-        // Allow Windows to release file handles before the next start.
-        await Task.Delay(TimeSpan.FromSeconds(5));
+        // 3b. Exercise the real crash-reconciliation path: GetStatusAsync detects the
+        //     dead PID, writes Health=Crashed to the state store, and clears QemuPid.
+        //     StartAsync must start from a reconciled Crashed state, not a manually
+        //     patched one — this is the path a real unclean termination uses (U7 / R7).
+        var statusAfterKill = await fx.Service.GetStatusAsync(Ct());
+        Assert.Equal(HealthState.Crashed, statusAfterKill.Health);
+        Console.WriteLine("[AE5] Status correctly reconciled to Crashed after kill.");
+
+        // Allow remaining file handles to drain before restart.
+        await Task.Delay(TimeSpan.FromSeconds(3));
 
         // 4. Restart.
         var restartResult = await fx.Service.StartAsync(progress, Ct());
