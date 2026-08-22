@@ -219,6 +219,39 @@ public sealed class RecoverySwapStateTests
     }
 
     [Fact]
+    public void JunctionAliasToCurrentSystemImage_IsRejectedAsRecoveryReplacement()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"SerpyRecoverAlias-{Guid.NewGuid():N}");
+        var currentDirectory = Path.Combine(directory, "current");
+        var aliasDirectory = Path.Combine(directory, "alias");
+        Directory.CreateDirectory(currentDirectory);
+        try
+        {
+            var systemImage = Path.Combine(currentDirectory, "system.qcow2");
+            var replacement = Path.Combine(aliasDirectory, "system.qcow2");
+            File.WriteAllText(systemImage, "accepted image");
+
+            using var junction = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{aliasDirectory}\" \"{currentDirectory}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            junction!.WaitForExit();
+            Assert.Equal(0, junction.ExitCode);
+
+            Assert.True(RecoverOperation.IsCurrentSystemImageReplacement(systemImage, replacement));
+        }
+        finally
+        {
+            if (Directory.Exists(aliasDirectory))
+                System.Diagnostics.Process.Start("cmd.exe", $"/c rmdir \"{aliasDirectory}\"")!.WaitForExit();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void JournalledSwapWithSystemMissing_BypassesInstalledImageValidation()
     {
         Assert.True(RecoverOperation.IsInterruptedSwapAwaitingCopy(

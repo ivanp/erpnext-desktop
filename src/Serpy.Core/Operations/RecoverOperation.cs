@@ -327,9 +327,45 @@ public sealed class RecoverOperation(
     public static bool IsCurrentSystemImageReplacement(
         string currentSystemImagePath, string replacementImagePath) =>
         string.Equals(
-            Path.GetFullPath(currentSystemImagePath),
-            Path.GetFullPath(replacementImagePath),
+            ResolveReparsePointAliases(currentSystemImagePath),
+            ResolveReparsePointAliases(replacementImagePath),
             StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveReparsePointAliases(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath)!;
+        var resolved = root;
+        var components = fullPath[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        for (var index = 0; index < components.Length; index++)
+        {
+            var candidate = Path.Combine(resolved, components[index]);
+            if (Directory.Exists(candidate))
+            {
+                var directory = new DirectoryInfo(candidate);
+                if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    var target = directory.ResolveLinkTarget(returnFinalTarget: true);
+                    if (target is not null)
+                    {
+                        resolved = target.FullName;
+                        continue;
+                    }
+                }
+            }
+
+            resolved = candidate;
+        }
+
+        var file = new FileInfo(resolved);
+        if (file.Exists && (file.Attributes & FileAttributes.ReparsePoint) != 0)
+            resolved = file.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? resolved;
+
+        return Path.GetFullPath(resolved);
+    }
 
     public static bool IsCompletedCopyAwaitingJournal(
         bool currentMatchesReplacement, string originalImageSha256,
