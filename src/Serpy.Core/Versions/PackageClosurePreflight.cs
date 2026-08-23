@@ -44,8 +44,8 @@ public sealed class PackageClosurePreflight(VersionManifest manifest, HttpMessag
             if (!sums.Contains(expectedNodeLine, StringComparison.Ordinal))
                 throw new InvalidOperationException($"Node SHA-256 manifest lacks '{expectedNodeLine}'.");
 
-            await AssertGitTagAsync(http, "frappe/frappe", manifest.Apps.Frappe.Branch, ct);
-            await AssertGitTagAsync(http, "frappe/erpnext", manifest.Apps.ErpNext.Branch, ct);
+            await AssertGitCommitAsync(http, "frappe/frappe", manifest.Apps.Frappe.Branch, manifest.Apps.Frappe.Commit, ct);
+            await AssertGitCommitAsync(http, "frappe/erpnext", manifest.Apps.ErpNext.Branch, manifest.Apps.ErpNext.Commit, ct);
             await AssertPyPiVersionAsync(http, "frappe-bench", "5.31.0", ct);
         }
         catch (PackageClosureException)
@@ -71,9 +71,31 @@ public sealed class PackageClosurePreflight(VersionManifest manifest, HttpMessag
             throw new InvalidOperationException($"APT snapshot does not resolve {package}={version} from {url}.");
     }
 
-    private static async Task AssertGitTagAsync(HttpClient http, string repository, string tag, CancellationToken ct)
+    private static async Task AssertGitCommitAsync(HttpClient http, string repository, string tag, string expectedCommit, CancellationToken ct)
     {
-        await AssertSuccessAsync(http, $"{GitHubApi}/{repository}/git/ref/tags/{tag}", ct);
+        if (string.IsNullOrWhiteSpace(expectedCommit))
+            throw new InvalidOperationException($"{repository} has no configured immutable commit for {tag}.");
+
+        using var refDoc = JsonDocument.Parse(await GetTextAsync(http, $"{GitHubApi}/{repository}/git/ref/tags/{tag}", ct));
+        var resolved = await DereferenceGitObjectAsync(http,
+            refDoc.RootElement.GetProperty("object"), repository, ct);
+        if (!string.Equals(resolved, expectedCommit, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{repository} tag {tag} resolves to commit {resolved}; expected pinned commit {expectedCommit}.");
+    }
+
+    private static async Task<string> DereferenceGitObjectAsync(HttpClient http, JsonElement gitObject, string repository, CancellationToken ct)
+    {
+        var type = gitObject.GetProperty("type").GetString();
+        var sha = gitObject.GetProperty("sha").GetString();
+        if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(sha))
+            throw new InvalidOperationException($"{repository} returned an incomplete Git object.");
+        if (string.Equals(type, "commit", StringComparison.Ordinal)) return sha;
+        if (!string.Equals(type, "tag", StringComparison.Ordinal))
+            throw new InvalidOperationException($"{repository} tag resolves to unexpected Git object type '{type}'.");
+
+        using var tagDoc = JsonDocument.Parse(await GetTextAsync(http, $"{GitHubApi}/{repository}/git/tags/{sha}", ct));
+        return await DereferenceGitObjectAsync(http, tagDoc.RootElement.GetProperty("object"), repository, ct);
     }
 
     private static async Task AssertPyPiVersionAsync(HttpClient http, string package, string version, CancellationToken ct)

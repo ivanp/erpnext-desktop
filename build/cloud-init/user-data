@@ -35,8 +35,8 @@ runcmd:
   - tar -C /usr/local --strip-components=1 -xJf /tmp/node.tar.xz
   - rm -f /tmp/node.tar.xz
   - useradd -m -s /bin/bash frappe
-  - su - frappe -c "bench init --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench"
-  - su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch v16.32.3"
+  - su - frappe -c "bench init --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench && cd /home/frappe/frappe-bench/apps/frappe && git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99 && git rev-parse HEAD | grep -Fx 6a329d068416768ec47ccd3326b9cc95a8d7bf99"
+  - su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch v16.32.3 && cd apps/erpnext && git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325 && git rev-parse HEAD | grep -Fx 11e0ba0a1c45f217e2e73e885f699102d06da325"
   - su - frappe -c "cd /home/frappe/frappe-bench && bench build --production"
   - su - frappe -c "cd /home/frappe/frappe-bench && bench setup nginx"
   - cp /home/frappe/frappe-bench/config/nginx.conf /etc/nginx/conf.d/frappe.conf

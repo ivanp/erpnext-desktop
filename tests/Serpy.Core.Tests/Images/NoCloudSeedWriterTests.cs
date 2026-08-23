@@ -146,6 +146,16 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     }
 
     [Fact]
+    public void ProductionCloudInit_ChecksOutExactApplicationCommits()
+    {
+        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+
+        Assert.Contains("git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99", template);
+        Assert.Contains("git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325", template);
+        Assert.Contains("git rev-parse HEAD | grep -Fx", template);
+    }
+
+    [Fact]
     public void ProductionCloudInit_InstallsCurlBeforeMariaDbKeyDownload()
     {
         var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));

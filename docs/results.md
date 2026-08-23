@@ -19,7 +19,7 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 144 | Pass — 2026-08-23 |
+| `Serpy.Core.Tests` | 152 | Pass — 2026-08-23 |
 | `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
@@ -70,13 +70,14 @@ the archive URL and SHA-256.
 |---|---|
 | NSIS installer requires elevation | Removed installer selection and legacy manifest fields; archive-only resolver is per-user. |
 | Archive SHA allowed empty | Archive installs reject a missing SHA-256 before download. |
-| Archive skipped binary/TLS probes | Archive now validates contents, version lock, and `tls-creds-x509` before atomic commit. |
+| Archive skipped binary/TLS probes | Archive validates contents, version, and GnuTLS support before replacement. |
+| Stale files accepted as an installed bundle | Reuse requires an atomically written marker matching the archive SHA-256 and QEMU version. |
 | ZIP layout could retain `qemu.zip` or fail on top-level directory | Extracts into a separate temporary tree and accepts one expected top-level bundle root. |
 | CI smoke patched installer hash | Smoke temporary manifest now patches only `archiveUrl` and `archiveSha256`. |
 
 ### Guest package-closure preflight
 
-Before it downloads the Debian base image or starts QEMU, `BuildOperation` resolves the locked Redis, Python 3.14, MariaDB, Node, Frappe, ERPNext, and `frappe-bench` inputs from their recorded immutable sources. A resolution failure is reported as a host-side package-closure failure rather than a guest provisioning failure. The deterministic fixture tests cover both successful closure and a missing exact apt package; live source endpoint checks returned HTTP 200 on 2026-08-23.
+Before it downloads the Debian base image or starts QEMU, `BuildOperation` resolves the locked Redis, Python 3.14, MariaDB, Node, Frappe, ERPNext, and `frappe-bench` inputs from their recorded immutable sources. Frappe and ERPNext tags are dereferenced recursively through GitHub's Git-object API and must resolve to their configured commits; guest cloud-init then checks out and verifies those commits before asset build. A resolution failure is reported as a host-side package-closure failure rather than a guest provisioning failure. The deterministic fixture tests cover successful lightweight and annotated tags, tag/commit mismatch, and a missing exact apt package; live source endpoint checks returned HTTP 200 on 2026-08-23.
 
 ---
 

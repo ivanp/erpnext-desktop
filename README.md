@@ -16,7 +16,7 @@ Two-disk model:
 The source implements U1–U7 and deterministic verification. Windows appliance build, initialization, persistence, recovery, and durability experiments remain pending because the required immutable, integrity-anchored QEMU archive has not been published. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
 
 - Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; archive delivery-chain validation awaits a published immutable artifact.
-- Deterministic tests: `Serpy.Core.Tests` 144 pass, `Serpy.App.Tests` 47 pass.
+- Deterministic tests: `Serpy.Core.Tests` 152 pass, `Serpy.App.Tests` 47 pass.
 - Linux x64 and macOS x64 are compile/publish-checked extension targets, not runtime-delivered platforms.
 
 ## Prerequisites (Windows)

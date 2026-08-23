@@ -61,6 +61,8 @@ public sealed class VersionManifest
     public sealed class AppEntry
     {
         public string Branch { get; set; } = string.Empty;
+        /// <summary>Immutable Git commit resolved from the provision tag.</summary>
+        public string Commit { get; set; } = string.Empty;
         public string Lock { get; set; } = string.Empty;
         public string MinVersion { get; set; } = string.Empty;
     }

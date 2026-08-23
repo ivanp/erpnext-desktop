@@ -114,9 +114,9 @@ public static class VersionManifestLoader
             Apps = new VersionManifest.AppsSection
             {
                 Frappe = new VersionManifest.AppEntry
-                    { Branch = Get("apps.frappe.branch"), Lock = Get("apps.frappe.lock"), MinVersion = Get("apps.frappe.minversion") },
+                    { Branch = Get("apps.frappe.branch"), Commit = Get("apps.frappe.commit"), Lock = Get("apps.frappe.lock"), MinVersion = Get("apps.frappe.minversion") },
                 ErpNext = new VersionManifest.AppEntry
-                    { Branch = Get("apps.erpnext.branch"), Lock = Get("apps.erpnext.lock"), MinVersion = Get("apps.erpnext.minversion") },
+                    { Branch = Get("apps.erpnext.branch"), Commit = Get("apps.erpnext.commit"), Lock = Get("apps.erpnext.lock"), MinVersion = Get("apps.erpnext.minversion") },
             },
         };
     }

@@ -40,15 +40,17 @@ runtime:
     lock: "8.0.2"
     floor: "8.0.0"
 
-# Frappe/ERPNext application version locks (exact, as reported by bench version).
-# lock: numeric version bench reports (normalised from v-prefixed provision tag).
+# Frappe/ERPNext application locks combine the human-auditable release tag,
+# exact reported version, and immutable commit that the guest checks out.
 # minVersion: floor used by the downgrade guard during recover.
 apps:
   frappe:
     branch: "v16.31.0"
+    commit: "6a329d068416768ec47ccd3326b9cc95a8d7bf99"
     lock: "16.31.0"
     minVersion: "16.0.0"
   erpnext:
     branch: "v16.32.3"
+    commit: "11e0ba0a1c45f217e2e73e885f699102d06da325"
     lock: "16.32.3"
     minVersion: "16.0.0"

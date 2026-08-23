@@ -24,8 +24,8 @@ public sealed class PackageClosurePreflightTests
             ["node-v24.2.0-linux-x64.tar.xz"] = "node archive",
             ["v24.2.0/SHASUMS256.txt"] =
                 "91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  node-v24.2.0-linux-x64.tar.xz\n",
-            ["git/ref/tags/v16.31.0"] = "{\"ref\":\"refs/tags/v16.31.0\"}",
-            ["git/ref/tags/v16.32.3"] = "{\"ref\":\"refs/tags/v16.32.3\"}",
+            ["git/ref/tags/v16.31.0"] = "{\"object\":{\"type\":\"commit\",\"sha\":\"6a329d068416768ec47ccd3326b9cc95a8d7bf99\"}}",
+            ["git/ref/tags/v16.32.3"] = "{\"object\":{\"type\":\"commit\",\"sha\":\"11e0ba0a1c45f217e2e73e885f699102d06da325\"}}",
             ["pypi/frappe-bench/5.31.0/json"] = "{\"info\":{\"version\":\"5.31.0\"}}",
         });
 
@@ -54,6 +54,32 @@ public sealed class PackageClosurePreflightTests
         Assert.Contains("8.0.2", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ValidateAsync_TagResolvingToDifferentCommit_ReportsHostResolutionFailure()
+    {
+        using var handler = new FixtureHandler(Responses(frappeRef:
+            "{\"object\":{\"type\":\"commit\",\"sha\":\"0000000000000000000000000000000000000000\"}}"));
+
+        var ex = await Assert.ThrowsAsync<PackageClosureException>(
+            () => new PackageClosurePreflight(Manifest(), handler).ValidateAsync());
+
+        Assert.Contains("frappe/frappe", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("commit", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_AnnotatedTagDereferencesToLockedCommit_Succeeds()
+    {
+        var commit = Manifest().Apps.Frappe.Commit;
+        using var handler = new FixtureHandler(Responses(
+            frappeRef: "{\"object\":{\"type\":\"tag\",\"sha\":\"tag-object\"}}",
+            frappeTag: $"{{\"object\":{{\"type\":\"commit\",\"sha\":\"{commit}\"}}}}"));
+
+        await new PackageClosurePreflight(Manifest(), handler).ValidateAsync();
+
+        Assert.Contains(handler.Requests, uri => uri.EndsWith("git/tags/tag-object", StringComparison.Ordinal));
+    }
+
     private static VersionManifest Manifest() => new()
     {
         Runtime = new VersionManifest.RuntimeSection
@@ -65,9 +91,22 @@ public sealed class PackageClosurePreflightTests
         },
         Apps = new VersionManifest.AppsSection
         {
-            Frappe = new VersionManifest.AppEntry { Branch = "v16.31.0", Lock = "16.31.0", MinVersion = "16.0.0" },
-            ErpNext = new VersionManifest.AppEntry { Branch = "v16.32.3", Lock = "16.32.3", MinVersion = "16.0.0" },
+            Frappe = new VersionManifest.AppEntry { Branch = "v16.31.0", Commit = "6a329d068416768ec47ccd3326b9cc95a8d7bf99", Lock = "16.31.0", MinVersion = "16.0.0" },
+            ErpNext = new VersionManifest.AppEntry { Branch = "v16.32.3", Commit = "11e0ba0a1c45f217e2e73e885f699102d06da325", Lock = "16.32.3", MinVersion = "16.0.0" },
         },
+    };
+
+    private static Dictionary<string, string> Responses(string? frappeRef = null, string? frappeTag = null) => new()
+    {
+        ["trixie/main/binary-amd64/Packages.gz"] = AptPackages(("redis-server", "5:8.0.2-3+deb13u2")),
+        ["sid/main/binary-amd64/Packages.gz"] = AptPackages(("python3.14", "3.14.7-1"), ("python3.14-dev", "3.14.7-1"), ("python3.14-venv", "3.14.7-1")),
+        ["mariadb-11.8.3/repo/debian/dists/trixie/main/binary-amd64/Packages.gz"] = AptPackages(("mariadb-server", "1:11.8.3+maria~deb13")),
+        ["node-v24.2.0-linux-x64.tar.xz"] = "node archive",
+        ["v24.2.0/SHASUMS256.txt"] = "91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  node-v24.2.0-linux-x64.tar.xz\n",
+        ["git/ref/tags/v16.31.0"] = frappeRef ?? $"{{\"object\":{{\"type\":\"commit\",\"sha\":\"{Manifest().Apps.Frappe.Commit}\"}}}}",
+        ["git/ref/tags/v16.32.3"] = $"{{\"object\":{{\"type\":\"commit\",\"sha\":\"{Manifest().Apps.ErpNext.Commit}\"}}}}",
+        ["git/tags/tag-object"] = frappeTag ?? "{}",
+        ["pypi/frappe-bench/5.31.0/json"] = "{\"info\":{\"version\":\"5.31.0\"}}",
     };
 
     private static string AptPackages(params (string Name, string Version)[] packages) => string.Join("\n\n", packages.Select(p => $"Package: {p.Name}\nVersion: {p.Version}"));

@@ -22,6 +22,15 @@ public sealed class VersionManifestLoaderTests
     }
 
     [Fact]
+    public void Load_RealVersionsYaml_PinsExactApplicationCommits()
+    {
+        var manifest = VersionManifestLoader.Load();
+
+        Assert.Matches("^[0-9a-f]{40}$", manifest.Apps.Frappe.Commit);
+        Assert.Matches("^[0-9a-f]{40}$", manifest.Apps.ErpNext.Commit);
+    }
+
+    [Fact]
     public void Load_RealVersionsYaml_LocksAreValidVersionStrings()
     {
         var manifest = VersionManifestLoader.Load();
@@ -64,15 +73,17 @@ public sealed class VersionManifestLoaderTests
                 lock: "11.8.3"
                 floor: "11.8.0"
               redis:
-                lock: "8.0.1"
+                lock: "8.0.2"
                 floor: "8.0.0"
             apps:
               frappe:
                 branch: "v16.31.0"
+                commit: "6a329d068416768ec47ccd3326b9cc95a8d7bf99"
                 lock: "16.31.0"
                 minVersion: "16.0.0"
               erpnext:
                 branch: "v16.32.3"
+                commit: "11e0ba0a1c45f217e2e73e885f699102d06da325"
                 lock: "16.32.3"
                 minVersion: "16.0.0"
             """);
@@ -84,6 +95,8 @@ public sealed class VersionManifestLoaderTests
             Assert.Equal("https://example.com/qemu.zip", m.Qemu.Windows.ArchiveUrl);
             Assert.Equal("def789", m.Qemu.Windows.ArchiveSha256);
             Assert.Equal("trixie",             m.DebianCloudImage.Release);
+            Assert.Equal("6a329d068416768ec47ccd3326b9cc95a8d7bf99", m.Apps.Frappe.Commit);
+            Assert.Equal("11e0ba0a1c45f217e2e73e885f699102d06da325", m.Apps.ErpNext.Commit);
             Assert.Equal("abc512",             m.DebianCloudImage.Sha512);
             Assert.Equal("3.14.7",             m.Runtime.Python.Lock);
             Assert.Equal("24.0.0",             m.Runtime.Node.Floor);
