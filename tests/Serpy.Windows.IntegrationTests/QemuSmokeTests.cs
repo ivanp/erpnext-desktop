@@ -89,7 +89,7 @@ public sealed class QemuSmokeTests : IAsyncLifetime
                 },
             });
 
-            await resolver.EnsureInstalledAsync(
+            await resolver.InstallAsync(
                 new Progress<string>(msg => Console.WriteLine($"[resolver] {msg}")));
 
             _resolvedBundleDir = resolver.BundleDir;

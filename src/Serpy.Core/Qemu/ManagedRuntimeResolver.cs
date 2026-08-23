@@ -6,11 +6,21 @@ using Serpy.Core.Configuration;
 namespace Serpy.Core.Qemu;
 
 /// <summary>
-/// Downloads, verifies, and installs the managed QEMU runtime archive.
+/// Resolves, verifies, and installs the managed QEMU runtime.
 ///
-/// The archive is fetched into a per-user temporary directory, SHA-256 verified,
-/// safely extracted, functionally probed, then atomically moved into the managed
-/// runtime directory. No installer or elevation boundary participates.
+/// This type has two deliberately separate surfaces (IR4):
+/// <list type="bullet">
+/// <item><b>Resolution/detection</b> — <see cref="QemuSystemExe"/>, <see cref="QemuImgExe"/>,
+/// <see cref="ShareDir"/>, <see cref="IsInstalled"/> — side-effect-free, non-elevating.
+/// Every lifecycle operation (build/init/start/recover) depends only on this surface.</item>
+/// <item><b>Installing</b> — <see cref="InstallAsync"/> — the only elevating entry point.
+/// It is reachable only through the consented setup flow (IU2), never a lifecycle operation.</item>
+/// </list>
+/// For the NSIS delivery path, elevation happens in the separate signed
+/// <c>Serpy.InstallerBootstrapper.exe</c> (IR3/IKTD1), launched through
+/// <see cref="BootstrapLauncher"/>; this resolver never launches the vendor installer
+/// directly. On a zero exit it validates the returned staging tree
+/// (<c>ValidateContents</c>/<c>-version</c>/TLS) and only then commits.
 /// </summary>
 public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 {
@@ -40,25 +50,35 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         : manifest.Windows.ArchiveSha256;
 
     /// <summary>
-    /// Ensure the QEMU runtime is installed and verified.
-    /// No-ops if already complete; downloads and installs otherwise.
+    /// Delegate seam for launching the elevated install bootstrapper. Defaults to
+    /// <see cref="DefaultBootstrapLauncher"/> (real <c>runas</c> launch of
+    /// <c>Serpy.InstallerBootstrapper.exe</c>). Tests substitute this to exercise
+    /// accept/decline/failure without a real UAC prompt. Returns the helper's exit
+    /// code and reported staging directory, or throws
+    /// <see cref="System.ComponentModel.Win32Exception"/> on UAC decline (mirrors
+    /// <c>WhpxEnabler.EnableAndRequestRestart</c>).
     /// </summary>
-    public async Task EnsureInstalledAsync(
+    internal Func<BootstrapRequest, CancellationToken, Task<BootstrapLaunchResult>> BootstrapLauncher { get; set; }
+        = DefaultBootstrapLauncher;
+
+    /// <summary>
+    /// Install the QEMU runtime. This is the <b>only</b> elevating entry point on this
+    /// type — call only from the consented setup flow (IU2), never a lifecycle operation.
+    /// No-ops (returns <see cref="InstallOutcome.AlreadyInstalled"/>) if already complete.
+    /// </summary>
+    public async Task<InstallOutcome> InstallAsync(
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
         if (IsInstalled())
         {
             progress?.Report("QEMU runtime already installed.");
-            return;
+            return InstallOutcome.AlreadyInstalled;
         }
 
         if (!string.IsNullOrWhiteSpace(manifest.Windows.InstallerUrl))
-        {
-            await InstallFromNsisAsync(manifest.Windows.InstallerUrl,
+            return await InstallFromNsisAsync(manifest.Windows.InstallerUrl,
                 manifest.Windows.InstallerSha256, progress, ct);
-            return;
-        }
 
         if (string.IsNullOrEmpty(manifest.Windows.ArchiveUrl))
             throw new InvalidOperationException(
@@ -67,6 +87,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
         await InstallFromZipAsync(manifest.Windows.ArchiveUrl,
             manifest.Windows.ArchiveSha256, progress, ct);
+        return InstallOutcome.Installed;
     }
 
     public bool IsInstalled()
@@ -136,7 +157,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         }
     }
 
-    private async Task InstallFromNsisAsync(
+    private async Task<InstallOutcome> InstallFromNsisAsync(
         string url, string expectedSha,
         IProgress<string>? progress, CancellationToken ct)
     {
@@ -155,20 +176,38 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             progress?.Report("Verifying installer SHA-256…");
             VerifySha256Required(installerPath, expectedSha);
 
-            var stagingDir = Path.Combine(tempRoot, "bundle");
-            progress?.Report("Installing QEMU for this user…");
-            var psi = new ProcessStartInfo(installerPath)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            psi.ArgumentList.Add("/S");
-            psi.ArgumentList.Add($"/D={stagingDir}");
-            using var installer = Process.Start(psi) ?? throw new InvalidOperationException("Could not start QEMU installer.");
-            await installer.WaitForExitAsync(ct);
-            if (installer.ExitCode != 0)
-                throw new InvalidOperationException($"QEMU installer failed with exit code {installer.ExitCode}.");
+            // The vendor installer is launched only by the separate signed elevated
+            // bootstrapper (IR3/IKTD1), never directly by this non-elevated app.
+            // The bootstrapper copies to an admin-only path, re-verifies against the
+            // signed descriptor it trusts, ACL-hardens a fresh staging tree to the
+            // authenticated original-user SID, and reports that staging path back.
+            var request = new BootstrapRequest(
+                InstallerPath: installerPath,
+                PipeName: $"Serpy.InstallerBootstrapper.{Guid.NewGuid():N}",
+                Nonce: BootstrapProtocol.CreateNonce(),
+                ClaimedOriginalUserSid: CurrentUserSid());
 
+            progress?.Report("Waiting for administrator approval…");
+            BootstrapLaunchResult result;
+            try
+            {
+                result = await BootstrapLauncher(request, ct);
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // User declined UAC (mirrors WhpxEnabler.EnableAndRequestRestart).
+                return InstallOutcome.ElevationDeclined;
+            }
+
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Elevated QEMU install failed with exit code {result.ExitCode}.");
+            if (string.IsNullOrWhiteSpace(result.StagingDir) || !Directory.Exists(result.StagingDir))
+                throw new InvalidOperationException(
+                    "Elevated install reported success but returned no valid staging directory.");
+
+            var stagingDir = result.StagingDir;
+            progress?.Report("Validating installed contents…");
             ValidateContents(stagingDir);
             var stagingExe = Path.Combine(stagingDir, "qemu-system-x86_64.exe");
             var versionOutput = await WhpxProbe.GetVersionAsync(stagingExe, ct);
@@ -178,12 +217,43 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             await ProbeHasTlsAsync(stagingExe, ResolveFirmwareDir(stagingDir), ct);
             CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
             progress?.Report($"QEMU runtime installed: {versionOutput.Trim()}");
+            return InstallOutcome.Installed;
         }
         finally
         {
             if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
         }
     }
+
+    private static string CurrentUserSid()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Elevated QEMU install is Windows-only.");
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return identity.User?.Value
+            ?? throw new InvalidOperationException("Could not resolve the current user's SID.");
+    }
+
+    /// <summary>
+    /// Real default launcher for the elevated install bootstrapper.
+    ///
+    /// <b>Not yet implemented.</b> <c>Serpy.InstallerBootstrapper.exe</c> — the separate
+    /// signed executable that hosts the authenticated named pipe, verifies the signed
+    /// descriptor, and performs the actual `runas`-elevated copy/re-verify/launch (IR3/
+    /// IKTD1) — does not exist as a project yet. This launcher therefore fails closed
+    /// <b>before any elevation attempt</b>: it must never reach <c>Process.Start</c> with
+    /// <c>Verb="runas"</c>, because prompting UAC and then failing afterward would be a
+    /// disguised stub reachable through a live elevation path. Once
+    /// <c>Serpy.InstallerBootstrapper</c> exists, this method is replaced with the real
+    /// pipe-authenticated launch; until then, callers get an explicit, honest failure.
+    /// </summary>
+    private static Task<BootstrapLaunchResult> DefaultBootstrapLauncher(
+        BootstrapRequest request, CancellationToken ct) =>
+        throw new NotSupportedException(
+            "Elevated QEMU install is not available: the separate signed " +
+            "Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) has not been built yet. " +
+            "No UAC elevation was attempted.");
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     private static async Task DownloadAsync(string url, string dest, CancellationToken ct)
@@ -388,3 +458,37 @@ public sealed class RuntimeManifest
         public string LicenseNoticeUrl { get; set; } = string.Empty;
     }
 }
+
+/// <summary>Typed outcome of <see cref="ManagedRuntimeResolver.InstallAsync"/>.</summary>
+public enum InstallOutcome
+{
+    /// <summary>Runtime was already installed and verified; no elevation attempted.</summary>
+    AlreadyInstalled,
+
+    /// <summary>Runtime was downloaded, elevated-installed (or archive-installed), validated, and committed.</summary>
+    Installed,
+
+    /// <summary>The user declined the UAC elevation prompt. No partial runtime was left behind.</summary>
+    ElevationDeclined,
+}
+
+/// <summary>
+/// Request handed to the elevated install bootstrapper. Carries no expected-hash
+/// field (the descriptor the bootstrapper trusts is authoritative — see IR3/IKTD3)
+/// and no caller-supplied destination (the destination is derived from the
+/// pipe-authenticated client SID inside the elevated helper, never from this
+/// request's <see cref="ClaimedOriginalUserSid"/> alone).
+/// </summary>
+public sealed record BootstrapRequest(
+    string InstallerPath,
+    string PipeName,
+    string Nonce,
+    string ClaimedOriginalUserSid);
+
+/// <summary>
+/// Result reported by the elevated install bootstrapper over the authenticated
+/// pipe: the process exit code, and — on success — the validated, ACL-hardened
+/// staging directory for the non-elevated resolver to run
+/// <c>ValidateContents</c>/<c>-version</c>/TLS against before committing.
+/// </summary>
+public sealed record BootstrapLaunchResult(int ExitCode, string? StagingDir);

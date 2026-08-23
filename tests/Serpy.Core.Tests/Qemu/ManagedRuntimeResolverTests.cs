@@ -114,7 +114,7 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         });
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => resolver.EnsureInstalledAsync());
+            () => resolver.InstallAsync());
 
         Assert.Contains("archivesha256", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -213,6 +213,182 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         });
 
         Assert.Equal("installer-sha", resolver.DeliveryFingerprint);
+    }
+
+    // ── Elevated install path (IU1): typed outcomes via the launcher seam ────────
+
+    private string WriteInstallerSourceFile(byte[] content)
+    {
+        Directory.CreateDirectory(_tempRoot);
+        var path = Path.Combine(_tempRoot, "qemu-w64-setup.exe");
+        File.WriteAllBytes(path, content);
+        return path;
+    }
+
+    [Fact]
+    public async Task InstallAsync_LauncherThrowsWin32Exception_ReturnsElevationDeclined()
+    {
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        using var sha = SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(installerPath)));
+
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = hash,
+            },
+        })
+        {
+            BootstrapLauncher = (_, _) => throw new System.ComponentModel.Win32Exception("declined"),
+        };
+
+        var outcome = await resolver.InstallAsync();
+        Assert.Equal(InstallOutcome.ElevationDeclined, outcome);
+        Assert.False(resolver.IsInstalled());
+    }
+
+    [Fact]
+    public async Task InstallAsync_LauncherReturnsNonZeroExit_ThrowsNamingExitCode()
+    {
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        using var sha = SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(installerPath)));
+
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = hash,
+            },
+        })
+        {
+            BootstrapLauncher = (_, _) => Task.FromResult(new BootstrapLaunchResult(ExitCode: 5, StagingDir: null)),
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => resolver.InstallAsync());
+        Assert.Contains("5", ex.Message);
+        Assert.False(resolver.IsInstalled());
+    }
+
+    [Fact]
+    public async Task InstallAsync_LauncherReturnsZeroExitButNoStagingDir_ThrowsWithoutCommitting()
+    {
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        using var sha = SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(installerPath)));
+
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = hash,
+            },
+        })
+        {
+            BootstrapLauncher = (_, _) => Task.FromResult(new BootstrapLaunchResult(ExitCode: 0, StagingDir: null)),
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => resolver.InstallAsync());
+        Assert.False(resolver.IsInstalled());
+    }
+
+    [Fact]
+    public async Task InstallAsync_DefaultLauncher_FailsClosedBeforeAnyElevationAttempt()
+    {
+        // Serpy.InstallerBootstrapper.exe (IR3/IKTD1) does not exist as a project yet.
+        // The default launcher must fail before ever calling Process.Start with
+        // Verb="runas" -- a UAC-prompt-then-fail sequence would be a disguised stub
+        // reachable through a live elevation path, which is not acceptable.
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        using var sha = SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(installerPath)));
+
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = hash,
+            },
+        }); // uses the real default BootstrapLauncher, not a stub
+
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(() => resolver.InstallAsync());
+        Assert.Contains("Serpy.InstallerBootstrapper.exe", ex.Message);
+        Assert.False(resolver.IsInstalled());
+    }
+
+    [Fact]
+    public async Task InstallAsync_ShaMismatch_AbortsBeforeLauncherIsInvoked()
+    {
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        var launcherCalls = 0;
+
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = new string('0', 64), // wrong on purpose
+            },
+        })
+        {
+            BootstrapLauncher = (_, _) =>
+            {
+                launcherCalls++;
+                return Task.FromResult(new BootstrapLaunchResult(0, "unused"));
+            },
+        };
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => resolver.InstallAsync());
+        Assert.Equal(0, launcherCalls);
+    }
+
+    [Fact]
+    public async Task InstallAsync_AlreadyInstalled_ReturnsWithoutInvokingLauncher()
+    {
+        // Uses a unique QemuVersion so BundleDir (derived from KnownPaths.RuntimeDir,
+        // not the test's own _tempRoot) doesn't collide with other tests or a real
+        // installed runtime; cleaned up explicitly since it's outside _tempRoot.
+        var version = $"test-{Guid.NewGuid():N}";
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = version,
+            Windows = new RuntimeManifest.WindowsBundle { InstallerSha256 = "installer-sha" },
+        });
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(resolver.BundleDir, "share", "qemu"));
+            File.WriteAllText(Path.Combine(resolver.BundleDir, "qemu-system-x86_64.exe"), string.Empty);
+            File.WriteAllText(Path.Combine(resolver.BundleDir, "qemu-img.exe"), string.Empty);
+            File.WriteAllText(Path.Combine(resolver.BundleDir, "share", "qemu", "bios-256k.bin"), string.Empty);
+            ManagedRuntimeResolver.WriteValidationMarker(resolver.BundleDir, version, "installer-sha");
+
+            var launcherCalls = 0;
+            resolver.BootstrapLauncher = (_, _) =>
+            {
+                launcherCalls++;
+                return Task.FromResult(new BootstrapLaunchResult(0, "x"));
+            };
+
+            var outcome = await resolver.InstallAsync();
+
+            Assert.Equal(InstallOutcome.AlreadyInstalled, outcome);
+            Assert.Equal(0, launcherCalls);
+        }
+        finally
+        {
+            if (Directory.Exists(resolver.BundleDir)) Directory.Delete(resolver.BundleDir, recursive: true);
+        }
     }
 
     [Fact]
@@ -317,5 +493,42 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             sw.Write("evil");
         }
         return path;
+    }
+
+
+    // ── Caller audit (IR4): lifecycle operations never call the elevating install path ──
+
+    [Theory]
+    [InlineData("BuildOperation.cs")]
+    [InlineData("InitializeOperation.cs")]
+    [InlineData("StartOperation.cs")]
+    [InlineData("RecoverOperation.cs")]
+    public void LifecycleOperation_NeverCallsInstallAsync(string fileName)
+    {
+        // Structural guard for IR4/IU1: the four lifecycle operations must reach
+        // ManagedRuntimeResolver only through its side-effect-free resolution
+        // surface (QemuSystemExe/QemuImgExe/ShareDir/IsInstalled), never the
+        // elevating InstallAsync — so a future edit that wires install into a
+        // lifecycle op fails this test instead of silently introducing a
+        // mid-operation UAC prompt. A source scan is used because these types are
+        // composed via DI at the app's composition root, not discoverable from a
+        // unit test's object graph.
+        var path = FindOperationsSourceFile(fileName);
+        var source = File.ReadAllText(path);
+
+        Assert.DoesNotContain("InstallAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureInstalledAsync", source, StringComparison.Ordinal);
+    }
+
+    private static string FindOperationsSourceFile(string fileName)
+    {
+        var dir = AppContext.BaseDirectory;
+        for (var i = 0; i < 8 && dir is not null; i++, dir = Path.GetDirectoryName(dir))
+        {
+            var candidate = Path.Combine(dir, "src", "Serpy.Core", "Operations", fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        throw new FileNotFoundException(
+            $"Could not locate src/Serpy.Core/Operations/{fileName} by walking up from {AppContext.BaseDirectory}.");
     }
 }

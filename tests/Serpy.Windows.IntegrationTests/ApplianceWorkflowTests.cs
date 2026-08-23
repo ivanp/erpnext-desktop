@@ -79,8 +79,8 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
         healthCreds.Store(SiteName, AdminPassword);
 
         // Runtime must already be installed (SERPY_RUN_SMOKE installs it).
-        // EnsureInstalledAsync is idempotent and no-ops when already present.
-        await resolver.EnsureInstalledAsync(
+        // InstallAsync is idempotent and no-ops when already present.
+        await resolver.InstallAsync(
             new Progress<string>(m => Console.WriteLine($"[resolver] {m}")));
 
         var cloudInitDir = FindCloudInitDir();
