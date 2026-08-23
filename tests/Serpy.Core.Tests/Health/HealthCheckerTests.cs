@@ -60,4 +60,18 @@ public sealed class HealthCredentialsTests : IDisposable
         // On other platforms it's plaintext but at least the filename is clean.
         // We don't assert on file content here since it's platform-dependent.
     }
+
+    [Fact]
+    public void Store_ReplacesExistingHiddenCredential()
+    {
+        Directory.CreateDirectory(_dir);
+        var storePath = Path.Combine(_dir, "cred");
+        var creds = new HealthCredentials(storePath);
+        creds.Store("site1.local", "first-password");
+        File.SetAttributes(storePath, File.GetAttributes(storePath) | FileAttributes.Hidden);
+
+        creds.Store("site1.local", "replacement-password");
+
+        Assert.Equal("replacement-password", creds.Retrieve()!.Value.AdminPassword);
+    }
 }

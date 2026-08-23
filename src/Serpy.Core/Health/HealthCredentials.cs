@@ -37,6 +37,8 @@ public sealed class HealthCredentials
         var stored = OperatingSystem.IsWindows() ? DpapiEncrypt(bytes) : bytes;
 
         Directory.CreateDirectory(Path.GetDirectoryName(_storePath)!);
+        if (OperatingSystem.IsWindows() && File.Exists(_storePath))
+            File.SetAttributes(_storePath, File.GetAttributes(_storePath) & ~FileAttributes.Hidden);
         File.WriteAllBytes(_storePath, stored);
         if (OperatingSystem.IsWindows()) TryHideFile(_storePath);
     }

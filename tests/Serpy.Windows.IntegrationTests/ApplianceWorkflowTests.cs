@@ -64,8 +64,6 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
             QemuVersion = manifest.Qemu.Version,
             Windows     = new RuntimeManifest.WindowsBundle
             {
-                InstallerUrl     = manifest.Qemu.Windows.InstallerUrl,
-                Sha256           = manifest.Qemu.Windows.Sha256,
                 ArchiveUrl       = manifest.Qemu.Windows.ArchiveUrl,
                 ArchiveSha256    = manifest.Qemu.Windows.ArchiveSha256,
                 SourceUrl        = manifest.Qemu.Windows.SourceUrl,

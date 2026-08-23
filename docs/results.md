@@ -17,11 +17,13 @@
 
 ## Deterministic verification
 
-| Suite | Tests | Status |
+| Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 136 | Pass — 2026-08-23 |
+| `Serpy.Core.Tests` | 144 | Pass — 2026-08-23 |
 | `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
-| Windows appliance integration | 2 opt-in guards pass | Full build/init/endurance experiment blocked: workspace empty and required `SERPY_ADMIN_PASSWORD` / `SERPY_RUN_APPLIANCE` are unset |
+| Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
+| macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
+| Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment blocked: no immutable QEMU archive URL/SHA-256 and required `SERPY_ADMIN_PASSWORD` / `SERPY_RUN_APPLIANCE` are unset |
 
 ### Windows Native-AOT publish
 
@@ -52,24 +54,29 @@ use `-machine q35` (corrected from `-machine none` which is invalid with `-accel
 
 **Total: 5/5 passed in 0.54 s** (`SERPY_QEMU_VERSIONS_YAML=config/versions.yaml`)
 
-### Installation provenance
+### Archive delivery status
 
-Stefan Weil installer `qemu-w64-setup-20260811.exe`  
-SHA-256: `f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f`  
-Installed via: `eng/install-qemu-local.ps1` (NSIS `/S /D=` to user-writable path, no elevation needed)  
-The managed-chain download → SHA verify → NSIS install → version probe → TLS probe → atomic rename
-path in `ManagedRuntimeResolver` is exercised on a clean machine via `qemu-windows.yml` CI workflow.
+The former Stefan Weil NSIS installer requires elevation and cannot satisfy the
+per-user, no-privileged-helper product contract. It is no longer a configured
+runtime source. The resolver now accepts only a SHA-256-pinned QEMU archive,
+probes its version and GnuTLS support before commit, and rejects an empty
+archive descriptor. The repository has no immutable archive release asset yet,
+so end-to-end appliance verification is blocked until release publishing supplies
+the archive URL and SHA-256.
 
-### Fixes applied during U2 verification
+### Archive runtime hardening
 
 | Issue | Fix |
 |---|---|
-| `-machine none` invalid with WHPX | Changed to `-machine q35` in `WhpxProbe.RunAsync` and both smoke QMP tests |
-| `WhpxProbe.RunAsync` hung under `-S` | Bounded 5 s stderr read; explicit kill; liveness check instead of `WaitForExitAsync` |
-| Empty SHA silently skipped | NSIS path now throws `InvalidOperationException` if SHA is empty |
-| Staging → `BundleDir` direct install | NSIS installs to staging dir; version + TLS probes; atomic rename |
-| `qemu.version: "9.2.x"` not pinned | Pinned to `11.1.0`; `-version` output must contain pinned version before commit |
-| GnuTLS transitive DLLs missing from build script | Added libnettle, libhogweed, libgmp, libp11-kit, libidn2, libunistring, libtasn1 |
+| NSIS installer requires elevation | Removed installer selection and legacy manifest fields; archive-only resolver is per-user. |
+| Archive SHA allowed empty | Archive installs reject a missing SHA-256 before download. |
+| Archive skipped binary/TLS probes | Archive now validates contents, version lock, and `tls-creds-x509` before atomic commit. |
+| ZIP layout could retain `qemu.zip` or fail on top-level directory | Extracts into a separate temporary tree and accepts one expected top-level bundle root. |
+| CI smoke patched installer hash | Smoke temporary manifest now patches only `archiveUrl` and `archiveSha256`. |
+
+### Guest package-closure preflight
+
+Before it downloads the Debian base image or starts QEMU, `BuildOperation` resolves the locked Redis, Python 3.14, MariaDB, Node, Frappe, ERPNext, and `frappe-bench` inputs from their recorded immutable sources. A resolution failure is reported as a host-side package-closure failure rather than a guest provisioning failure. The deterministic fixture tests cover both successful closure and a missing exact apt package; live source endpoint checks returned HTTP 200 on 2026-08-23.
 
 ---
 
@@ -112,6 +119,6 @@ path in `ManagedRuntimeResolver` is exercised on a clean machine via `qemu-windo
 | Python | 3.14.7 | — | 3.14.0 | PENDING full appliance build |
 | Node.js | 24.2.0 | — | 24.0.0 | PENDING full appliance build |
 | MariaDB | 11.8.3 | — | 11.8.0 | PENDING full appliance build |
-| Redis | 8.0.1 | — | 8.0.0 | PENDING full appliance build |
+| Redis | 8.0.2 | — | 8.0.0 | PENDING full appliance build |
 | Frappe | 16.31.0 | — | 16.0.0 | PENDING full appliance build |
 | ERPNext | 16.32.3 | — | 16.0.0 | PENDING full appliance build |

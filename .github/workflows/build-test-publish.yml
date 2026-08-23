@@ -77,3 +77,52 @@ jobs:
           name: serpy-app-win-x64
           path: dist/
           retention-days: 30
+
+  publish-extension-targets:
+    name: ${{ matrix.name }} target publish
+    runs-on: ${{ matrix.runner }}
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x64
+            runner: macos-13
+            rid: osx-x64
+          - name: Linux x64
+            runner: ubuntu-latest
+            rid: linux-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore target runtime pack
+        run: dotnet restore src/Serpy.App/Serpy.App.csproj -r ${{ matrix.rid }}
+
+      - name: Publish compile-only extension target
+        run: >-
+          dotnet publish src/Serpy.App/Serpy.App.csproj
+          -c Release -r ${{ matrix.rid }} --no-restore
+          /p:SelfContained=true
+          -o publish/${{ matrix.rid }}
+
+      - name: Assert GUI artifact and provisioning assets
+        shell: pwsh
+        run: |
+          $extension = if ($IsWindows) { '.exe' } else { '' }
+          $required = @(
+            "publish/${{ matrix.rid }}/Serpy.App$extension",
+            'publish/${{ matrix.rid }}/config/versions.yaml',
+            'publish/${{ matrix.rid }}/cloud-init/user-data',
+            'publish/${{ matrix.rid }}/guest/init-data.sh'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "Missing extension publish output: $($missing -join ', ')" }
+
+      - name: State runtime-coverage boundary
+        run: echo "${{ matrix.name }} publish is compile-only; no runtime QEMU acceptance is claimed."
