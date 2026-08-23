@@ -197,6 +197,55 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         Assert.Equal("old", File.ReadAllText(Path.Combine(existing, "validated.txt")));
     }
 
+    [Fact]
+    public void DeliveryFingerprint_ConfiguredInstallerTakesPrecedence()
+    {
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                ArchiveUrl = "https://example.invalid/qemu.zip",
+                ArchiveSha256 = "archive-sha",
+                InstallerUrl = "https://example.invalid/qemu.exe",
+                InstallerSha256 = "installer-sha",
+            },
+        });
+
+        Assert.Equal("installer-sha", resolver.DeliveryFingerprint);
+    }
+
+    [Fact]
+    public void DeliveryFingerprint_UsesArchiveWhenInstallerIsNotConfigured()
+    {
+        var resolver = MakeResolver();
+
+        Assert.Equal("0000000000000000000000000000000000000000000000000000000000000000",
+            resolver.DeliveryFingerprint);
+    }
+
+    [Fact]
+    public void ResolveFirmwareDir_UsesInstallerShareRoot()
+    {
+        var bundle = Path.Combine(_tempRoot, "bundle");
+        var share = Path.Combine(bundle, "share");
+        Directory.CreateDirectory(share);
+        File.WriteAllText(Path.Combine(share, "bios-256k.bin"), string.Empty);
+
+        Assert.Equal(share, ManagedRuntimeResolver.ResolveFirmwareDir(bundle));
+    }
+
+    [Fact]
+    public void ResolveFirmwareDir_UsesArchiveShareQemuDirectory()
+    {
+        var bundle = Path.Combine(_tempRoot, "bundle");
+        var shareQemu = Path.Combine(bundle, "share", "qemu");
+        Directory.CreateDirectory(shareQemu);
+        File.WriteAllText(Path.Combine(shareQemu, "bios-256k.bin"), string.Empty);
+
+        Assert.Equal(shareQemu, ManagedRuntimeResolver.ResolveFirmwareDir(bundle));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     // Reflection-free access to private static methods via delegate wrappers.

@@ -19,11 +19,11 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 152 | Pass — 2026-08-23 |
+| `Serpy.Core.Tests` | 156 | Pass — 2026-08-23 |
 | `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
-| Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment blocked: no immutable QEMU archive URL/SHA-256 and required `SERPY_ADMIN_PASSWORD` / `SERPY_RUN_APPLIANCE` are unset |
+| Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment pending: set `SERPY_ADMIN_PASSWORD` and `SERPY_RUN_APPLIANCE=1`; the configured per-user QEMU installer is checksum-pinned but has not yet been clean-installed through the acceptance workflow. |
 
 ### Windows Native-AOT publish
 
@@ -54,26 +54,17 @@ use `-machine q35` (corrected from `-machine none` which is invalid with `-accel
 
 **Total: 5/5 passed in 0.54 s** (`SERPY_QEMU_VERSIONS_YAML=config/versions.yaml`)
 
-### Archive delivery status
+### Per-user installer delivery status
 
-The former Stefan Weil NSIS installer requires elevation and cannot satisfy the
-per-user, no-privileged-helper product contract. It is no longer a configured
-runtime source. The resolver now accepts only a SHA-256-pinned QEMU archive,
-probes its version and GnuTLS support before commit, and rejects an empty
-archive descriptor. The repository has no immutable archive release asset yet,
-so end-to-end appliance verification is blocked until release publishing supplies
-the archive URL and SHA-256.
-
-### Archive runtime hardening
+The user approved the Stefan Weil NSIS installer as the runtime delivery mechanism. `ManagedRuntimeResolver` downloads it over HTTPS, verifies SHA-256 `f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f`, installs it silently into a same-volume staging directory under the current user’s `%LOCALAPPDATA%\Serpy\runtime`, validates files/version/GnuTLS, and atomically commits it with the validation marker. No QEMU PATH dependency is used. The clean installer delivery chain and appliance workflow remain pending.
 
 | Issue | Fix |
 |---|---|
-| NSIS installer requires elevation | Removed installer selection and legacy manifest fields; archive-only resolver is per-user. |
-| Archive SHA allowed empty | Archive installs reject a missing SHA-256 before download. |
-| Archive skipped binary/TLS probes | Archive validates contents, version, and GnuTLS support before replacement. |
-| Stale files accepted as an installed bundle | Reuse requires an atomically written marker matching the archive SHA-256 and QEMU version. |
-| ZIP layout could retain `qemu.zip` or fail on top-level directory | Extracts into a separate temporary tree and accepts one expected top-level bundle root. |
-| CI smoke patched installer hash | Smoke temporary manifest now patches only `archiveUrl` and `archiveSha256`. |
+| Installer output could bypass validation | Installer targets staging, then follows the same validation and atomic commit path as archives. |
+| Installer SHA allowed empty | Installer install rejects a missing SHA-256 before execution. |
+| Archive skipped binary/TLS probes | Both delivery modes validate contents, version, and GnuTLS support before replacement. |
+| Stale files accepted as an installed bundle | Reuse requires an atomically written marker matching the delivery SHA-256 and QEMU version. |
+| Replacement move fails | Existing bundle is renamed to a same-volume backup and restored on failed staging move. |
 
 ### Guest package-closure preflight
 

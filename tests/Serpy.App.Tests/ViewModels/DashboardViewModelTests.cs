@@ -74,7 +74,6 @@ public sealed class DashboardViewModelTests
         Assert.False(vm.CanBuild);
         Assert.True(vm.CanInitialize);
     }
-
     [Theory]
     [InlineData(HealthState.Stopped, true)]
     [InlineData(HealthState.Running, false)]

@@ -13,17 +13,17 @@ Two-disk model:
 
 ## Status
 
-The source implements U1–U7 and deterministic verification. Windows appliance build, initialization, persistence, recovery, and durability experiments remain pending because the required immutable, integrity-anchored QEMU archive has not been published. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
+The source implements U1–U7 and deterministic verification. The Windows appliance build, initialization, persistence, recovery, and durability experiments are pending the opt-in acceptance run. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
 
-- Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; archive delivery-chain validation awaits a published immutable artifact.
-- Deterministic tests: `Serpy.Core.Tests` 152 pass, `Serpy.App.Tests` 47 pass.
+- Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; the per-user installer delivery path awaits a clean delivery-chain run.
+- Deterministic tests: `Serpy.Core.Tests` 156 pass, `Serpy.App.Tests` 47 pass.
 - Linux x64 and macOS x64 are compile/publish-checked extension targets, not runtime-delivered platforms.
 
 ## Prerequisites (Windows)
 
 - Windows 10 22H2 / Windows 11 x64
 - **Windows Hypervisor Platform** feature enabled (Settings → Turn Windows features on or off → Windows Hypervisor Platform → reboot)
-- No QEMU on PATH required — Serpy downloads and SHA-verifies a managed QEMU bundle into `%LOCALAPPDATA%\Serpy\runtime`.
+- No QEMU on PATH required — Serpy downloads, SHA-verifies, and silently installs the configured QEMU installer into `%LOCALAPPDATA%\Serpy\runtime` for the current user.
 
 ## Build & test
 

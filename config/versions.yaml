@@ -7,9 +7,10 @@ qemu:
   # ManagedRuntimeResolver verifies the extracted binary before commit.
   version: "11.1.0"
   windows:
-    # CI builds a WHPX, GnuTLS, and slirp archive from the pinned source.
-    # A release process must populate this immutable URL and matching SHA-256
-    # together; an empty pair intentionally prevents an untrusted download.
+    # User-approved per-user NSIS delivery. The resolver verifies the installer
+    # SHA-256, installs into a staging directory, probes it, then atomically commits it.
+    installerUrl: "https://qemu.weilnetz.de/w64/qemu-w64-setup-20260811.exe"
+    installerSha256: "f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f"
     archiveUrl: ""
     archiveSha256: ""
     sourceUrl: "https://download.qemu.org/qemu-11.1.0.tar.xz"
