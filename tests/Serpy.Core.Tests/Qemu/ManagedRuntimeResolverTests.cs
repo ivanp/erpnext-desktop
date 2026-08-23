@@ -141,6 +141,62 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => ManagedRuntimeResolver.ResolveBundleRoot(root));
     }
 
+    [Fact]
+    public void ValidationMarker_MatchingArchiveAndVersion_IsRecognized()
+    {
+        var bundle = Path.Combine(_tempRoot, "bundle");
+        Directory.CreateDirectory(bundle);
+
+        ManagedRuntimeResolver.WriteValidationMarker(bundle, "11.1.0", "aabbcc");
+
+        Assert.True(ManagedRuntimeResolver.HasValidationMarker(bundle, "11.1.0", "AABBCC"));
+    }
+
+    [Fact]
+    public void ValidationMarker_WrongVersionOrArchive_IsRejected()
+    {
+        var bundle = Path.Combine(_tempRoot, "bundle");
+        Directory.CreateDirectory(bundle);
+        ManagedRuntimeResolver.WriteValidationMarker(bundle, "11.1.0", "aabbcc");
+
+        Assert.False(ManagedRuntimeResolver.HasValidationMarker(bundle, "11.1.1", "aabbcc"));
+        Assert.False(ManagedRuntimeResolver.HasValidationMarker(bundle, "11.1.0", "ddeeff"));
+    }
+
+    [Fact]
+    public void CommitValidatedBundle_ReplacesInvalidExistingBundleOnlyAfterValidation()
+    {
+        var existing = Path.Combine(_tempRoot, "existing");
+        var staging = Path.Combine(_tempRoot, "staging");
+        Directory.CreateDirectory(existing);
+        File.WriteAllText(Path.Combine(existing, "corrupt.txt"), "old");
+        Directory.CreateDirectory(staging);
+        File.WriteAllText(Path.Combine(staging, "validated.txt"), "new");
+
+        ManagedRuntimeResolver.CommitValidatedBundle(staging, existing, "11.1.0", "aabbcc");
+
+        Assert.False(File.Exists(Path.Combine(existing, "corrupt.txt")));
+        Assert.True(File.Exists(Path.Combine(existing, "validated.txt")));
+        Assert.True(ManagedRuntimeResolver.HasValidationMarker(existing, "11.1.0", "aabbcc"));
+    }
+
+    [Fact]
+    public void CommitValidatedBundle_MoveFailure_RestoresExistingBundle()
+    {
+        var existing = Path.Combine(_tempRoot, "existing");
+        var staging = Path.Combine(_tempRoot, "staging");
+        Directory.CreateDirectory(existing);
+        Directory.CreateDirectory(staging);
+        File.WriteAllText(Path.Combine(existing, "validated.txt"), "old");
+
+        Assert.Throws<IOException>(() => ManagedRuntimeResolver.CommitValidatedBundle(
+            staging, existing, "11.1.0", "aabbcc",
+            static (_, _) => throw new IOException("injected move failure")));
+
+        Assert.True(File.Exists(Path.Combine(existing, "validated.txt")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(existing, "validated.txt")));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     // Reflection-free access to private static methods via delegate wrappers.

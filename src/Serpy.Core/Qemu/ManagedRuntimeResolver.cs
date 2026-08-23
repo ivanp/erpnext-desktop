@@ -33,6 +33,8 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
     public string QemuImgExe    => Path.Combine(BundleDir, "qemu-img.exe");
     public string ShareDir      => Path.Combine(BundleDir, "share", "qemu");
 
+    private const string ValidationMarkerFileName = ".serpy-runtime-validation";
+
     /// <summary>
     /// Ensure the QEMU runtime is installed and verified.
     /// No-ops if already complete; downloads and installs otherwise.
@@ -58,12 +60,12 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
     public bool IsInstalled()
     {
-        if (!Directory.Exists(BundleDir)) return false;
+        if (string.IsNullOrWhiteSpace(manifest.Windows.ArchiveSha256) || !Directory.Exists(BundleDir)) return false;
         foreach (var rel in RequiredExes)
             if (!File.Exists(Path.Combine(BundleDir, rel))) return false;
         foreach (var rel in RequiredFirmwarePaths)
             if (!File.Exists(Path.Combine(BundleDir, rel))) return false;
-        return true;
+        return HasValidationMarker(BundleDir, manifest.QemuVersion, manifest.Windows.ArchiveSha256);
     }
 
 
@@ -114,7 +116,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             progress?.Report("Probing TLS support (--enable-gnutls required)…");
             await ProbeHasTlsAsync(stagingExe, stagingShare, ct);
 
-            Directory.Move(stagingDir, BundleDir);
+            CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
             progress?.Report($"QEMU runtime installed: {versionOutput.Trim()}");
         }
         finally
@@ -196,6 +198,59 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         {
             if (Directory.Exists(certDir)) Directory.Delete(certDir, recursive: true);
         }
+    }
+
+    internal static bool HasValidationMarker(string bundleDir, string version, string archiveSha256)
+    {
+        var markerPath = Path.Combine(bundleDir, ValidationMarkerFileName);
+        if (!File.Exists(markerPath)) return false;
+
+        try
+        {
+            var fields = File.ReadAllLines(markerPath);
+            return fields.Length == 2 &&
+                string.Equals(fields[0], version, StringComparison.Ordinal) &&
+                string.Equals(fields[1], archiveSha256, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    internal static void WriteValidationMarker(string bundleDir, string version, string archiveSha256)
+    {
+        var markerPath = Path.Combine(bundleDir, ValidationMarkerFileName);
+        var temporaryPath = markerPath + ".tmp";
+        File.WriteAllLines(temporaryPath, [version, archiveSha256]);
+        File.Move(temporaryPath, markerPath, overwrite: true);
+    }
+
+    internal static void CommitValidatedBundle(
+        string stagingDir,
+        string bundleDir,
+        string version,
+        string archiveSha256,
+        Action<string, string>? moveDirectory = null)
+    {
+        WriteValidationMarker(stagingDir, version, archiveSha256);
+        moveDirectory ??= Directory.Move;
+        var backupDir = bundleDir + ".replaced-" + Guid.NewGuid().ToString("N");
+        var hadExistingBundle = Directory.Exists(bundleDir);
+
+        if (hadExistingBundle) Directory.Move(bundleDir, backupDir);
+        try
+        {
+            moveDirectory(stagingDir, bundleDir);
+        }
+        catch
+        {
+            if (hadExistingBundle && !Directory.Exists(bundleDir))
+                Directory.Move(backupDir, bundleDir);
+            throw;
+        }
+
+        if (hadExistingBundle) Directory.Delete(backupDir, recursive: true);
     }
 
     internal static string ResolveBundleRoot(string extractionDir)
