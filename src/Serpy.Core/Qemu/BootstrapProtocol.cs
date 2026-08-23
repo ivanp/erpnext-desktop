@@ -24,15 +24,35 @@ public static class BootstrapProtocol
     public static string CreateNonce() => Convert.ToHexString(RandomNumberGenerator.GetBytes(NonceByteLength));
 
     /// <summary>
-    /// Constant-time nonce comparison — a nonce feeds an authentication decision,
-    /// so a timing side-channel on early-exit comparison is avoidable at negligible cost.
+    /// Constant-time nonce comparison. A nonce is always hex-encoded output from
+    /// <see cref="CreateNonce"/>: exactly 64 ASCII hex characters (32 decoded bytes).
+    /// A candidate that isn't 64 hex chars is rejected outright — never compared as
+    /// raw text, because <see cref="System.Text.Encoding.ASCII"/> maps every non-ASCII
+    /// character to the same '?' byte, so two distinct non-hex strings of equal length
+    /// could otherwise collide under a naive byte comparison.
     /// </summary>
     public static bool NoncesMatch(string expected, string actual)
     {
-        if (expected.Length != actual.Length) return false;
-        return CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.ASCII.GetBytes(expected),
-            System.Text.Encoding.ASCII.GetBytes(actual));
+        if (!TryDecodeNonce(expected, out var expectedBytes)) return false;
+        if (!TryDecodeNonce(actual, out var actualBytes)) return false;
+        return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+    }
+
+    private static bool TryDecodeNonce(string value, out byte[] bytes)
+    {
+        bytes = [];
+        if (value.Length != NonceByteLength * 2) return false;
+        foreach (var c in value)
+            if (!Uri.IsHexDigit(c)) return false;
+        try
+        {
+            bytes = Convert.FromHexString(value);
+            return bytes.Length == NonceByteLength;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -86,7 +106,16 @@ public static class BootstrapProtocol
         // Walk every existing ancestor segment under the root and reject a reparse point
         // anywhere in the chain — a symlinked intermediate directory could otherwise
         // redirect a contained-looking path outside the allowed root at resolve time.
+        // A fresh (not-yet-created) destination has no existing entry at the leaf, so the
+        // walk must start from the nearest existing ancestor, not the destination itself.
         var current = fullDestination;
+        while (!Directory.Exists(current) && !File.Exists(current))
+        {
+            var next = Path.GetDirectoryName(current);
+            if (next is null || string.Equals(next, current, StringComparison.OrdinalIgnoreCase))
+                return; // reached a drive root with nothing existing — nothing to check
+            current = next;
+        }
         while (Directory.Exists(current) || File.Exists(current))
         {
             var attrs = File.GetAttributes(current);

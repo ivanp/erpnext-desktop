@@ -43,6 +43,32 @@ public sealed class BootstrapProtocolTests : IDisposable
         Assert.False(BootstrapProtocol.NoncesMatch("abc", "abcd"));
     }
 
+    [Fact]
+    public void NoncesMatch_NonAsciiEqualLengthStrings_NeverCollideViaAsciiFallback()
+    {
+        // Regression: naive Encoding.ASCII.GetBytes maps every non-ASCII char to '?',
+        // so two distinct 64-char non-hex strings could otherwise compare equal.
+        var a = new string('é', 64);
+        var b = new string('ø', 64);
+        Assert.False(BootstrapProtocol.NoncesMatch(a, b));
+    }
+
+    [Fact]
+    public void NoncesMatch_NonHexCharacters_ReturnsFalse()
+    {
+        var validLength = new string('g', 64); // 'g' is not a hex digit
+        Assert.False(BootstrapProtocol.NoncesMatch(validLength, validLength));
+    }
+
+    [Fact]
+    public void NoncesMatch_RealNoncesFromCreateNonce_MatchThemselvesOnly()
+    {
+        var a = BootstrapProtocol.CreateNonce();
+        var b = BootstrapProtocol.CreateNonce();
+        Assert.True(BootstrapProtocol.NoncesMatch(a, a));
+        Assert.False(BootstrapProtocol.NoncesMatch(a, b));
+    }
+
     // ── Source validation ─────────────────────────────────────────────────
 
     [Fact]
@@ -148,6 +174,47 @@ public sealed class BootstrapProtocolTests : IDisposable
             () => BootstrapProtocol.ValidateDestinationUnderRoot(@"\\server\share\runtime", root));
     }
 
+    [Fact]
+    public void ValidateDestinationUnderRoot_FreshDestinationUnderReparseAncestor_Throws()
+    {
+        // Regression: the ancestor walk previously started at fullDestination and only
+        // entered its loop when that exact leaf already existed, so a *fresh* (not-yet-
+        // created) destination skipped the walk entirely — even when an ancestor
+        // directory higher up was a reparse point. It must start from the nearest
+        // existing ancestor instead.
+        Directory.CreateDirectory(_tempRoot);
+        var realAncestor = Path.Combine(_tempRoot, "real-runtime");
+        Directory.CreateDirectory(realAncestor);
+        var linkedAncestor = Path.Combine(_tempRoot, "runtime");
+
+        try
+        {
+            Directory.CreateSymbolicLink(linkedAncestor, realAncestor);
+        }
+        catch (Exception)
+        {
+            // Directory symlink creation can require elevation on some Windows
+            // configurations; skip rather than fail the suite on an environment limit.
+            return;
+        }
+
+        // The destination itself ("qemu-11.1.0") does not exist yet, but its parent
+        // ("runtime") is a reparse point — the walk must still catch it.
+        var freshDestination = Path.Combine(linkedAncestor, "qemu-11.1.0");
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => BootstrapProtocol.ValidateDestinationUnderRoot(freshDestination, linkedAncestor));
+        Assert.Contains("reparse point", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateDestinationUnderRoot_FreshDestinationNoExistingAncestor_DoesNotThrow()
+    {
+        // A destination whose entire chain up to a nonexistent root is fresh has
+        // nothing to walk — must not throw for lack of an existing entry.
+        var root = Path.Combine(_tempRoot, "brand-new-root");
+        var destination = Path.Combine(root, "qemu-11.1.0");
+        BootstrapProtocol.ValidateDestinationUnderRoot(destination, root); // must not throw
+    }
     [Fact]
     public void ValidateDestinationUnderRoot_EmptyDestination_Throws()
     {
