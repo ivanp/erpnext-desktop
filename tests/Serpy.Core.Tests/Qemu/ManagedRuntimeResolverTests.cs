@@ -99,34 +99,46 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         Assert.False(resolver.IsInstalled());
     }
 
+
     [Fact]
-    public async Task EnsureInstalled_EmptyNsisSha_ThrowsBeforeDownload()
+    public async Task EnsureInstalled_EmptyArchiveSha_ThrowsBeforeDownload()
     {
-        // Empty SHA on the NSIS installer path must be rejected immediately —
-        // never execute an unverified binary.
         var resolver = new ManagedRuntimeResolver(new RuntimeManifest
         {
             QemuVersion = "11.1.0",
             Windows = new RuntimeManifest.WindowsBundle
             {
-                InstallerUrl = "https://example.invalid/qemu.exe",
-                Sha256 = "", // empty — must be rejected
+                ArchiveUrl = "https://example.invalid/qemu.zip",
+                ArchiveSha256 = "",
             },
         });
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => resolver.EnsureInstalledAsync());
 
-        Assert.Contains("sha256", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("archivesha256", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+
+    [Fact]
+    public void ResolveBundleRoot_TopLevelBundleDirectory_ReturnsBundle()
+    {
+        var root = Path.Combine(_tempRoot, "archive");
+        var bundle = Path.Combine(root, "qemu-windows");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllText(Path.Combine(bundle, "qemu-system-x86_64.exe"), string.Empty);
+
+        Assert.Equal(bundle, ManagedRuntimeResolver.ResolveBundleRoot(root));
     }
 
     [Fact]
-    public void BuildNsisArguments_UsesFinalUnquotedDestination()
+    public void ResolveBundleRoot_AmbiguousArchive_Throws()
     {
-        Assert.Equal(
-            "/S /D=C:\\Users\\Test User\\AppData\\Local\\Serpy\\runtime\\staging",
-            ManagedRuntimeResolver.BuildNsisArguments(
-                "C:\\Users\\Test User\\AppData\\Local\\Serpy\\runtime\\staging"));
+        var root = Path.Combine(_tempRoot, "archive");
+        Directory.CreateDirectory(Path.Combine(root, "first"));
+        Directory.CreateDirectory(Path.Combine(root, "second"));
+
+        Assert.Throws<InvalidOperationException>(() => ManagedRuntimeResolver.ResolveBundleRoot(root));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

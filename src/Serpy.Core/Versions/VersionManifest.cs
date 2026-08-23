@@ -15,23 +15,12 @@ public sealed class VersionManifest
         public sealed class WindowsBundle
         {
             /// <summary>
-            /// Stefan Weil pre-built NSIS installer URL.
-            /// ManagedRuntimeResolver downloads, SHA-verifies, then
-            /// silently installs with elevation (/S /D=targetDir).
-            /// Preferred over archiveUrl when set.
-            /// </summary>
-            public string InstallerUrl { get; set; } = string.Empty;
-
-            /// <summary>SHA-256 of the NSIS installer file.</summary>
-            public string Sha256 { get; set; } = string.Empty;
-
-            /// <summary>
-            /// CI-built zip URL (build-windows.ps1 output). Used when
-            /// InstallerUrl is empty. Extracted without elevation.
+            /// Immutable Windows QEMU archive URL. The resolver downloads and
+            /// SHA-256 verifies this archive before contained extraction.
             /// </summary>
             public string ArchiveUrl { get; set; } = string.Empty;
 
-            /// <summary>SHA-256 of the CI-built zip (when archiveUrl is used).</summary>
+            /// <summary>SHA-256 of the immutable QEMU archive.</summary>
             public string ArchiveSha256 { get; set; } = string.Empty;
 
             public string SourceUrl { get; set; } = string.Empty;

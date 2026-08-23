@@ -65,22 +65,19 @@ public sealed class QemuSmokeTests : IAsyncLifetime
             var manifest = VersionManifestLoader.LoadFrom(VersionsYamlPath!);
             var win = manifest.Qemu.Windows;
 
-            bool hasInstaller = !string.IsNullOrEmpty(win.InstallerUrl) && !string.IsNullOrEmpty(win.Sha256);
-            bool hasArchive   = !string.IsNullOrEmpty(win.ArchiveUrl)   && !string.IsNullOrEmpty(win.ArchiveSha256);
-
-            if (!hasInstaller && !hasArchive)
+            bool hasArchive = !string.IsNullOrEmpty(win.ArchiveUrl) &&
+                              !string.IsNullOrEmpty(win.ArchiveSha256);
+            if (!hasArchive)
                 throw new InvalidOperationException(
-                    "SERPY_QEMU_VERSIONS_YAML: neither qemu.windows.installerUrl+sha256 " +
-                    "nor qemu.windows.archiveUrl+archiveSha256 is populated. " +
-                    "Set one pair in config/versions.yaml before running the managed-chain smoke.");
+                    "SERPY_QEMU_VERSIONS_YAML must populate " +
+                    "qemu.windows.archiveUrl+archiveSha256 before running " +
+                    "the managed-chain smoke.");
 
             var resolver = new ManagedRuntimeResolver(new RuntimeManifest
             {
                 QemuVersion = manifest.Qemu.Version,
                 Windows = new RuntimeManifest.WindowsBundle
                 {
-                    InstallerUrl     = win.InstallerUrl,
-                    Sha256           = win.Sha256,
                     ArchiveUrl       = win.ArchiveUrl,
                     ArchiveSha256    = win.ArchiveSha256,
                     SourceUrl        = win.SourceUrl,

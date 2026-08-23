@@ -86,8 +86,6 @@ public static class VersionManifestLoader
                 Version = Get("qemu.version"),
                 Windows = new VersionManifest.QemuSection.WindowsBundle
                 {
-                    InstallerUrl     = Get("qemu.windows.installerurl"),
-                    Sha256           = Get("qemu.windows.sha256"),
                     ArchiveUrl       = Get("qemu.windows.archiveurl"),
                     ArchiveSha256    = Get("qemu.windows.archivesha256"),
                     SourceUrl        = Get("qemu.windows.sourceurl"),

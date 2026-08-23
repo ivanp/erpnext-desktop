@@ -166,25 +166,24 @@ jobs:
       # ManagedRuntimeResolver.EnsureInstalledAsync() → SHA-256 verify → safe extract →
       # -version probe → then mTLS QMP query-status/quit.
       # The CI step achieves this by:
-      #   1. Serving the locally-built zip via a loopback file:// URI patched into versions.yaml.
-      #   2. Setting SERPY_QEMU_VERSIONS_YAML so the resolver reads the patched manifest.
+      #   1. Serving the locally-built ZIP over a loopback file:// URI.
+      #   2. Setting archiveUrl and archiveSha256 in a temporary manifest.
       #   3. The smoke test uses ManagedRuntimeResolver (not a raw SERPY_QEMU_DIR path).
 
-      - name: Patch versions.yaml with bundle URL and SHA
+      - name: Patch versions.yaml with archive URL and SHA
         shell: pwsh
         run: |
           $zipPath = "${{ github.workspace }}/dist/qemu-windows.zip"
           $sha = (Get-Content "${{ github.workspace }}/dist/qemu-windows.sha256").Trim()
-          $ver = "${{ steps.qemu-ver.outputs.version }}"
           # File URI that ManagedRuntimeResolver can download from (localhost loopback).
           $fileUri = "file:///" + $zipPath.Replace("\", "/")
 
           $yaml = Get-Content "config/versions.yaml" -Raw
           $yaml = $yaml -replace 'archiveUrl:\s*""', "archiveUrl: `"$fileUri`""
-          $yaml = $yaml -replace 'sha256:\s*""(\s*#.*)?', "sha256: `"$sha`""
+          $yaml = $yaml -replace 'archiveSha256:\s*""', "archiveSha256: `"$sha`""
           Set-Content "config/versions.yaml" $yaml
 
-          Write-Host "Patched versions.yaml: archiveUrl=$fileUri sha256=$sha"
+          Write-Host "Patched versions.yaml: archiveUrl=$fileUri archiveSha256=$sha"
           # Emit the patched file path for downstream steps.
           echo "SERPY_QEMU_VERSIONS_YAML=${{ github.workspace }}/config/versions.yaml" >> $env:GITHUB_ENV
 
