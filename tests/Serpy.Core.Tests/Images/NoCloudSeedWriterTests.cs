@@ -129,6 +129,33 @@ public sealed class NoCloudSeedWriterTests : IDisposable
         Assert.True(new FileInfo(iso).Length > 23 * 2048);
     }
 
+    [Fact]
+    public void ProductionCloudInit_UsesImmutableRepositoriesAndLockedArtifacts()
+    {
+        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+
+        Assert.Contains("snapshot.debian.org/archive/debian/20260822T000000Z/ trixie main", template);
+        Assert.Contains("snapshot.debian.org/archive/debian/20260822T000000Z/ sid main", template);
+        Assert.Contains("archive.mariadb.org/mariadb-11.8.3", template);
+        Assert.Contains("mariadb-server=1:11.8.3+maria~deb13", template);
+        Assert.Contains("redis-server=5:8.0.2-3+deb13u2", template);
+        Assert.Contains("node-v24.2.0-linux-x64.tar.xz", template);
+        Assert.Contains("91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5", template);
+        Assert.DoesNotContain("deb.nodesource.com/setup_", template);
+        Assert.DoesNotContain("downloads.mariadb.com/MariaDB/mariadb-11.8/repo", template);
+    }
+
+    [Fact]
+    public void ProductionCloudInit_InstallsCurlBeforeMariaDbKeyDownload()
+    {
+        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+        var installCurl = template.IndexOf("apt-get install -y curl", StringComparison.Ordinal);
+        var keyDownload = template.IndexOf("mariadb-keyring-2025.gpg", StringComparison.Ordinal);
+
+        Assert.True(installCurl >= 0 && installCurl < keyDownload,
+            "curl must be installed from the Debian snapshot before fetching the MariaDB signing key.");
+    }
+
     private static string ReadGuestAsset(string fileName) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "guest", fileName));
     [Fact]

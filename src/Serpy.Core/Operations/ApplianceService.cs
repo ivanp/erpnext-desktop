@@ -40,7 +40,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _lock      = new LifecycleLock();
         _statusOp  = new StatusOperation(stateStore);
         _buildOp   = new BuildOperation(
-            imageDownloader, seedWriter, imageTool,
+            imageDownloader, new PackageClosurePreflight(manifest), seedWriter, imageTool,
             runtimeResolver, certStore, stateStore, manifest, settings);
         _initOp    = new InitializeOperation(
             imageTool, runtimeResolver, certStore,

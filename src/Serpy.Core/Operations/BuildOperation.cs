@@ -29,6 +29,7 @@ namespace Serpy.Core.Operations;
 /// </summary>
 public sealed class BuildOperation(
     BaseImageDownloader imageDownloader,
+    PackageClosurePreflight packageClosurePreflight,
     NoCloudSeedWriter seedWriter,
     QemuImageTool imageTool,
     ManagedRuntimeResolver runtimeResolver,
@@ -58,22 +59,26 @@ public sealed class BuildOperation(
 
         try
         {
-            // 1. Base image
+            // 1. Resolve locked guest inputs before downloading or provisioning.
+            Report("preflight", "Verifying locked guest package closure…", 1);
+            await packageClosurePreflight.ValidateAsync(ct);
+
+            // 2. Base image
             Report("download", "Downloading Debian base image…", 5);
             await imageDownloader.EnsureAsync(
                 new Progress<string>(m => Report("download", m)), ct);
 
-            // 2. Seed ISO
+            // 3. Seed ISO
             Report("seed", "Writing cloud-init seed ISO…", 15);
             seedWriter.Write(SeedIsoPath);
 
-            // 3. Staging image
+            // 4. Staging image
             Report("image", "Creating staging system image…", 20);
             if (File.Exists(StagingPath)) File.Delete(StagingPath);
             await imageTool.CreateCopyAsync(imageDownloader.CachedImagePath, StagingPath, ct);
             await imageTool.ResizeAsync(StagingPath, 32, ct);
 
-            // 4. TLS material
+            // 5. TLS material
             if (!certStore.IsInitialized()) certStore.GenerateCertificates();
             var clientCert = certStore.LoadClientCert();
             var caCert     = certStore.LoadCaCert();
@@ -100,11 +105,11 @@ public sealed class BuildOperation(
                 .QmpOnChardev("qmp0")
                 .VirtioSerialDevice().QgaVirtioPort("qga0");
 
-            // 5. Boot
+            // 6. Boot
             Report("provision", "Booting provisioning VM…", 25);
             await using var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
 
-            // 6. Serial sentinel
+            // 7. Serial sentinel
             Report("provision", "Waiting for cloud-init (30–60 min)…", 30);
             await using var serial = await SerialClient.ConnectAsync(
                 "127.0.0.1", serialPort, clientCert, caCert, ct);
@@ -123,7 +128,7 @@ public sealed class BuildOperation(
                 return Fail(operationId, "Cloud-init did not complete within 2 hours.", logPath);
             }
 
-            // 7. QGA version gate (R9)
+            // 8. QGA version gate (R9)
             Report("version-gate", "Querying installed versions…", 85);
             await using var qga = await QgaClient.ConnectAsync(
                 "127.0.0.1", qgaPort, clientCert, caCert, ct);
@@ -144,8 +149,7 @@ public sealed class BuildOperation(
                     $"locked={ex.Locked} floor={ex.Floor}", logPath);
             }
 
-            // 8. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
-            Report("powerdown", "Sending graceful powerdown via QMP…", 95);
+            // 9. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
             await using var qmp = await QmpClient.ConnectAsync(
                 "127.0.0.1", qmpPort, clientCert, caCert, ct);
             await qmp.SendPowerdownAsync(ct);
@@ -154,8 +158,7 @@ public sealed class BuildOperation(
             if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
                 proc.Kill();
 
-            // 9. Atomic image rename, then attest to the final exact bytes.
-            Report("finalize", "Finalizing system image…", 98);
+            // 10. Atomic image rename, then attest to the final exact bytes.
             if (File.Exists(FinalPath)) File.Delete(FinalPath);
             File.Move(StagingPath, FinalPath);
 
