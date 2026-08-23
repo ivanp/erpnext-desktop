@@ -95,8 +95,6 @@ public sealed class TlsCertificateStore
         // Write QEMU-side material
         WritePem(QemuCertDir, "ca-cert.pem", caCert.ExportCertificatePem());
         WritePem(QemuCertDir, "server-cert.pem", serverCert.ExportCertificatePem());
-        using var serverKeyForQemu = serverCert.GetRSAPrivateKey()
-            ?? throw new InvalidOperationException("Server cert has no private key");
         WritePem(QemuCertDir, "server-key.pem", serverKey.ExportRSAPrivateKeyPem());
     }
 
