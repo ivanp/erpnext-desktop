@@ -19,11 +19,11 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 153 | Pass — 2026-08-23 |
+| `Serpy.Core.Tests` | 156 | Pass — 2026-08-23 |
 | `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
-| Windows appliance integration | 2 opt-in guards | Blocked: an immutable QEMU archive URL/SHA-256 has not been configured, and a complete run also requires `SERPY_ADMIN_PASSWORD`. The checksum-pinned NSIS installer was rejected because it requires elevation. |
+| Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment pending: set `SERPY_ADMIN_PASSWORD` and `SERPY_RUN_APPLIANCE=1`; the configured per-user QEMU installer is checksum-pinned but has not yet been clean-installed through the acceptance workflow. |
 
 ### Windows Native-AOT publish
 
@@ -54,15 +54,17 @@ use `-machine q35` (corrected from `-machine none` which is invalid with `-accel
 
 **Total: 5/5 passed in 0.54 s** (`SERPY_QEMU_VERSIONS_YAML=config/versions.yaml`)
 
-### QEMU delivery blocker
+### Per-user installer delivery status
 
-The attempted Stefan Weil NSIS installer has SHA-256 `f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f`, but the managed smoke executed it with `UseShellExecute=false` and Windows returned `Win32Exception: The requested operation requires elevation.` The same failure occurred on two independent fixture initializations after a fresh HTTPS download and checksum verification. Plan R16 and line 150 prohibit runtime elevation, so the installer is not a permissible fallback and is not configured by the active archive-only resolver.
+The user approved the Stefan Weil NSIS installer as the runtime delivery mechanism. `ManagedRuntimeResolver` downloads it over HTTPS, verifies SHA-256 `f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f`, installs it silently into a same-volume staging directory under the current user’s `%LOCALAPPDATA%\Serpy\runtime`, validates files/version/GnuTLS, and atomically commits it with the validation marker. No QEMU PATH dependency is used. The clean installer delivery chain and appliance workflow remain pending.
 
-Serpy requires a published immutable archive URL and SHA-256 containing the QEMU executables, GnuTLS runtime DLLs, and `share/qemu` firmware. The five mTLS smoke tests cannot serve as delivery-chain evidence until that archive is configured and clean-installed.
-
-| Separate resolved defect | Fix |
+| Issue | Fix |
 |---|---|
-| Certificate generation always threw before smoke setup | The server certificate is signed by the CA without its private key attached; export the generated `serverKey` directly instead of querying the certificate for a key. Regression-covered by `GenerateCertificates_WritesUsableMutualTlsMaterial`. |
+| Installer output could bypass validation | Installer targets staging, then follows the same validation and atomic commit path as archives. |
+| Installer SHA allowed empty | Installer install rejects a missing SHA-256 before execution. |
+| Archive skipped binary/TLS probes | Both delivery modes validate contents, version, and GnuTLS support before replacement. |
+| Stale files accepted as an installed bundle | Reuse requires an atomically written marker matching the delivery SHA-256 and QEMU version. |
+| Replacement move fails | Existing bundle is renamed to a same-volume backup and restored on failed staging move. |
 
 ### Guest package-closure preflight
 

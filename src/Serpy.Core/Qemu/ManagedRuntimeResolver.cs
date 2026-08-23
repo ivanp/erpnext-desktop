@@ -31,9 +31,13 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
     public string QemuSystemExe => Path.Combine(BundleDir, "qemu-system-x86_64.exe");
     public string QemuImgExe    => Path.Combine(BundleDir, "qemu-img.exe");
-    public string ShareDir      => Path.Combine(BundleDir, "share", "qemu");
+    public string ShareDir      => ResolveFirmwareDir(BundleDir);
 
     private const string ValidationMarkerFileName = ".serpy-runtime-validation";
+
+    internal string DeliveryFingerprint => !string.IsNullOrWhiteSpace(manifest.Windows.InstallerSha256)
+        ? manifest.Windows.InstallerSha256
+        : manifest.Windows.ArchiveSha256;
 
     /// <summary>
     /// Ensure the QEMU runtime is installed and verified.
@@ -49,10 +53,17 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(manifest.Windows.InstallerUrl))
+        {
+            await InstallFromNsisAsync(manifest.Windows.InstallerUrl,
+                manifest.Windows.InstallerSha256, progress, ct);
+            return;
+        }
+
         if (string.IsNullOrEmpty(manifest.Windows.ArchiveUrl))
             throw new InvalidOperationException(
-                "No QEMU archive source configured. Set qemu.windows.archiveUrl " +
-                "and qemu.windows.archiveSha256 in config/versions.yaml.");
+                "No QEMU archive or installer source configured. Set qemu.windows.installerUrl " +
+                "or qemu.windows.archiveUrl and its matching SHA-256 in config/versions.yaml.");
 
         await InstallFromZipAsync(manifest.Windows.ArchiveUrl,
             manifest.Windows.ArchiveSha256, progress, ct);
@@ -60,12 +71,12 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
     public bool IsInstalled()
     {
-        if (string.IsNullOrWhiteSpace(manifest.Windows.ArchiveSha256) || !Directory.Exists(BundleDir)) return false;
+        if (string.IsNullOrWhiteSpace(DeliveryFingerprint) || !Directory.Exists(BundleDir)) return false;
         foreach (var rel in RequiredExes)
             if (!File.Exists(Path.Combine(BundleDir, rel))) return false;
-        foreach (var rel in RequiredFirmwarePaths)
-            if (!File.Exists(Path.Combine(BundleDir, rel))) return false;
-        return HasValidationMarker(BundleDir, manifest.QemuVersion, manifest.Windows.ArchiveSha256);
+        try { _ = ResolveFirmwareDir(BundleDir); }
+        catch (InvalidOperationException) { return false; }
+        return HasValidationMarker(BundleDir, manifest.QemuVersion, DeliveryFingerprint);
     }
 
 
@@ -103,7 +114,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             progress?.Report("Validating bundle contents…");
             ValidateContents(stagingDir);
             var stagingExe = Path.Combine(stagingDir, "qemu-system-x86_64.exe");
-            var stagingShare = Path.Combine(stagingDir, "share", "qemu");
+            var stagingShare = ResolveFirmwareDir(stagingDir);
 
             progress?.Report($"Probing -version (expecting {manifest.QemuVersion})…");
             var versionOutput = await WhpxProbe.GetVersionAsync(stagingExe, ct);
@@ -125,6 +136,54 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         }
     }
 
+    private async Task InstallFromNsisAsync(
+        string url, string expectedSha,
+        IProgress<string>? progress, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSha))
+            throw new InvalidOperationException(
+                "qemu.windows.installerSha256 is empty. Extracting an unverified installer is not acceptable.");
+
+        Directory.CreateDirectory(KnownPaths.RuntimeDir);
+        var tempRoot = Path.Combine(KnownPaths.RuntimeDir, $".tmp-qemu-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var installerPath = Path.Combine(tempRoot, "qemu-w64-setup.exe");
+            progress?.Report("Downloading QEMU installer…");
+            await DownloadAsync(url, installerPath, ct);
+            progress?.Report("Verifying installer SHA-256…");
+            VerifySha256Required(installerPath, expectedSha);
+
+            var stagingDir = Path.Combine(tempRoot, "bundle");
+            progress?.Report("Installing QEMU for this user…");
+            var psi = new ProcessStartInfo(installerPath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("/S");
+            psi.ArgumentList.Add($"/D={stagingDir}");
+            using var installer = Process.Start(psi) ?? throw new InvalidOperationException("Could not start QEMU installer.");
+            await installer.WaitForExitAsync(ct);
+            if (installer.ExitCode != 0)
+                throw new InvalidOperationException($"QEMU installer failed with exit code {installer.ExitCode}.");
+
+            ValidateContents(stagingDir);
+            var stagingExe = Path.Combine(stagingDir, "qemu-system-x86_64.exe");
+            var versionOutput = await WhpxProbe.GetVersionAsync(stagingExe, ct);
+            if (!versionOutput.Contains("QEMU emulator version", StringComparison.OrdinalIgnoreCase) ||
+                !versionOutput.Contains(manifest.QemuVersion, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Version mismatch: installer reports '{versionOutput.Trim()}'.");
+            await ProbeHasTlsAsync(stagingExe, ResolveFirmwareDir(stagingDir), ct);
+            CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
+            progress?.Report($"QEMU runtime installed: {versionOutput.Trim()}");
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+        }
+    }
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     private static async Task DownloadAsync(string url, string dest, CancellationToken ct)
@@ -253,6 +312,17 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         if (hadExistingBundle) Directory.Delete(backupDir, recursive: true);
     }
 
+
+    public static string ResolveFirmwareDir(string bundleDir)
+    {
+        var archiveLayout = Path.Combine(bundleDir, "share", "qemu");
+        if (File.Exists(Path.Combine(archiveLayout, "bios-256k.bin"))) return archiveLayout;
+
+        var installerLayout = Path.Combine(bundleDir, "share");
+        if (File.Exists(Path.Combine(installerLayout, "bios-256k.bin"))) return installerLayout;
+
+        throw new InvalidOperationException("Bundle missing firmware: bios-256k.bin");
+    }
     internal static string ResolveBundleRoot(string extractionDir)
     {
         if (File.Exists(Path.Combine(extractionDir, RequiredExes[0])))
@@ -297,9 +367,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         foreach (var rel in RequiredExes)
             if (!File.Exists(Path.Combine(dir, rel)))
                 throw new InvalidOperationException($"Bundle missing: {rel}");
-        foreach (var rel in RequiredFirmwarePaths)
-            if (!File.Exists(Path.Combine(dir, rel)))
-                throw new InvalidOperationException($"Bundle missing firmware: {rel}");
+        _ = ResolveFirmwareDir(dir);
     }
 }
 
@@ -314,6 +382,8 @@ public sealed class RuntimeManifest
     {
         public string ArchiveUrl       { get; set; } = string.Empty;
         public string ArchiveSha256    { get; set; } = string.Empty;
+        public string InstallerUrl     { get; set; } = string.Empty;
+        public string InstallerSha256  { get; set; } = string.Empty;
         public string SourceUrl        { get; set; } = string.Empty;
         public string LicenseNoticeUrl { get; set; } = string.Empty;
     }

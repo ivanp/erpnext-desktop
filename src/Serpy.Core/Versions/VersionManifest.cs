@@ -14,14 +14,13 @@ public sealed class VersionManifest
 
         public sealed class WindowsBundle
         {
-            /// <summary>
-            /// Immutable Windows QEMU archive URL. The resolver downloads and
-            /// SHA-256 verifies this archive before contained extraction.
-            /// </summary>
+            /// <summary>Immutable Windows QEMU archive URL and SHA-256.</summary>
             public string ArchiveUrl { get; set; } = string.Empty;
-
-            /// <summary>SHA-256 of the immutable QEMU archive.</summary>
             public string ArchiveSha256 { get; set; } = string.Empty;
+
+            /// <summary>Optional per-user NSIS installer URL and SHA-256.</summary>
+            public string InstallerUrl { get; set; } = string.Empty;
+            public string InstallerSha256 { get; set; } = string.Empty;
 
             public string SourceUrl { get; set; } = string.Empty;
             public string LicenseNoticeUrl { get; set; } = string.Empty;
