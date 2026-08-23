@@ -67,13 +67,11 @@ public sealed class QemuSmokeTests : IAsyncLifetime
 
             bool hasArchive = !string.IsNullOrEmpty(win.ArchiveUrl) &&
                               !string.IsNullOrEmpty(win.ArchiveSha256);
-            bool hasInstaller = !string.IsNullOrEmpty(win.InstallerUrl) &&
-                                !string.IsNullOrEmpty(win.InstallerSha256);
-            if (!hasArchive && !hasInstaller)
+            if (!hasArchive)
                 throw new InvalidOperationException(
-                    "SERPY_QEMU_VERSIONS_YAML must populate either " +
-                    "qemu.windows.archiveUrl+archiveSha256 or " +
-                    "qemu.windows.installerUrl+installerSha256 before running the managed-chain smoke.");
+                    "SERPY_QEMU_VERSIONS_YAML must populate " +
+                    "qemu.windows.archiveUrl+archiveSha256 before running " +
+                    "the managed-chain smoke.");
 
             var resolver = new ManagedRuntimeResolver(new RuntimeManifest
             {
@@ -82,8 +80,6 @@ public sealed class QemuSmokeTests : IAsyncLifetime
                 {
                     ArchiveUrl       = win.ArchiveUrl,
                     ArchiveSha256    = win.ArchiveSha256,
-                    InstallerUrl     = win.InstallerUrl,
-                    InstallerSha256  = win.InstallerSha256,
                     SourceUrl        = win.SourceUrl,
                     LicenseNoticeUrl = win.LicenseNoticeUrl,
                 },
@@ -125,7 +121,7 @@ public sealed class QemuSmokeTests : IAsyncLifetime
         var dir = _resolvedBundleDir
             ?? throw new InvalidOperationException("Bundle dir not resolved; InitializeAsync failed.");
         var exe = Path.Combine(dir, "qemu-system-x86_64.exe");
-        var share = ManagedRuntimeResolver.ResolveFirmwareDir(dir);
+        var share = Path.Combine(dir, "share", "qemu");
         Assert.True(File.Exists(exe), $"qemu-system-x86_64.exe not found at: {exe}");
         return (exe, share);
     }

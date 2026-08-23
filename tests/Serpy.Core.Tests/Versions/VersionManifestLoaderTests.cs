@@ -54,8 +54,6 @@ public sealed class VersionManifestLoaderTests
               windows:
                 archiveUrl: "https://example.com/qemu.zip"
                 archiveSha256: "def789"
-                installerUrl: "https://example.com/qemu.exe"
-                installerSha256: "abc123"
                 sourceUrl: "https://example.com/src"
                 licenseNoticeUrl: "https://example.com/license"
             debianCloudImage:
@@ -96,8 +94,6 @@ public sealed class VersionManifestLoaderTests
             Assert.Equal("11.1.0",                       m.Qemu.Version);
             Assert.Equal("https://example.com/qemu.zip", m.Qemu.Windows.ArchiveUrl);
             Assert.Equal("def789", m.Qemu.Windows.ArchiveSha256);
-            Assert.Equal("https://example.com/qemu.exe", m.Qemu.Windows.InstallerUrl);
-            Assert.Equal("abc123", m.Qemu.Windows.InstallerSha256);
             Assert.Equal("trixie",             m.DebianCloudImage.Release);
             Assert.Equal("6a329d068416768ec47ccd3326b9cc95a8d7bf99", m.Apps.Frappe.Commit);
             Assert.Equal("11e0ba0a1c45f217e2e73e885f699102d06da325", m.Apps.ErpNext.Commit);

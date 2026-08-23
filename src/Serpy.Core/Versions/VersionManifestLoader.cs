@@ -88,8 +88,6 @@ public static class VersionManifestLoader
                 {
                     ArchiveUrl       = Get("qemu.windows.archiveurl"),
                     ArchiveSha256    = Get("qemu.windows.archivesha256"),
-                    InstallerUrl     = Get("qemu.windows.installerurl"),
-                    InstallerSha256  = Get("qemu.windows.installersha256"),
                     SourceUrl        = Get("qemu.windows.sourceurl"),
                     LicenseNoticeUrl = Get("qemu.windows.licensenoticeurl"),
                 },

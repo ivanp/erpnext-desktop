@@ -27,8 +27,6 @@ var runtimeManifest = new RuntimeManifest
     {
         ArchiveUrl       = manifest.Qemu.Windows.ArchiveUrl,
         ArchiveSha256    = manifest.Qemu.Windows.ArchiveSha256,
-        InstallerUrl     = manifest.Qemu.Windows.InstallerUrl,
-        InstallerSha256  = manifest.Qemu.Windows.InstallerSha256,
         SourceUrl        = manifest.Qemu.Windows.SourceUrl,
         LicenseNoticeUrl = manifest.Qemu.Windows.LicenseNoticeUrl,
     },

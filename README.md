@@ -13,10 +13,10 @@ Two-disk model:
 
 ## Status
 
-The source implements U1–U7 and deterministic verification. The Windows appliance build, initialization, persistence, recovery, and durability experiments are pending the opt-in acceptance run. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
+The source implements U1–U7 and deterministic verification. Windows appliance build, initialization, persistence, recovery, and durability experiments remain pending the opt-in acceptance run. Serpy requires a SHA-256-verified, immutable QEMU archive under `%LOCALAPPDATA%\Serpy\runtime`; no QEMU on PATH or elevated installer is permitted. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
 
-- Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; the per-user installer delivery path awaits a clean delivery-chain run.
-- Deterministic tests: `Serpy.Core.Tests` 156 pass, `Serpy.App.Tests` 47 pass.
+- Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; archive delivery-chain validation awaits a published immutable runtime archive.
+- Deterministic tests: `Serpy.Core.Tests` 153 pass, `Serpy.App.Tests` 47 pass.
 - Linux x64 and macOS x64 are compile/publish-checked extension targets, not runtime-delivered platforms.
 
 ## Prerequisites (Windows)
