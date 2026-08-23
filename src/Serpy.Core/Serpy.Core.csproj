@@ -6,4 +6,43 @@
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
+
+  <!--
+    Descriptor trust anchor (IR3/IR7): the QEMU runtime descriptor's trusted
+    public key is a build input, never a source literal.
+
+    SerpyReleasePublish (bool, default false) is set ONLY by the actual release
+    packaging pipeline (eng/package-windows.ps1 / the publish CI job), never
+    by `dotnet build -c Release` or `dotnet test -c Release`, which are this
+    repo's standard optimized dev/test commands (see AGENTS.md) and must keep
+    working without a signing key. When SerpyReleasePublish=true, the real
+    Serpy publisher key MUST be supplied via
+    `-p:SerpyDescriptorTrustKey=<base64 SPKI>`; the build fails closed below if
+    it is not. Local dev/test builds may auto-pick up the gitignored local test
+    key purely for convenience, never when SerpyReleasePublish=true.
+
+    The local-dev key is read via an MSBuild property function
+    ($([System.IO.File]::ReadAllText(...))) so it resolves at static project
+    evaluation time, before any AssemblyMetadata item is read. A Target-based
+    approach (ReadLinesFromFile + a Task that sets the property) works when
+    building this project directly but was observed to not reliably execute
+    when this project is built as part of the Serpy.slnx solution graph, so it
+    is deliberately avoided here.
+  -->
+  <PropertyGroup>
+    <SerpyReleasePublish Condition="'$(SerpyReleasePublish)' == ''">false</SerpyReleasePublish>
+    <_SerpyLocalDevTrustKeyPath>$(MSBuildThisFileDirectory)..\..\.local-signing\descriptor-signing-public.b64</_SerpyLocalDevTrustKeyPath>
+    <SerpyDescriptorTrustKey Condition="'$(SerpyDescriptorTrustKey)' == '' AND '$(SerpyReleasePublish)' != 'true' AND Exists('$(_SerpyLocalDevTrustKeyPath)')">$([System.IO.File]::ReadAllText('$(_SerpyLocalDevTrustKeyPath)').Trim())</SerpyDescriptorTrustKey>
+    <SerpyDescriptorTrustKeySource Condition="'$(SerpyDescriptorTrustKeySource)' == '' AND '$(SerpyDescriptorTrustKey)' != ''">local-dev-test-key</SerpyDescriptorTrustKeySource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="SerpyDescriptorTrustKey" Value="$(SerpyDescriptorTrustKey)" />
+    <AssemblyMetadata Include="SerpyDescriptorTrustKeySource" Value="$(SerpyDescriptorTrustKeySource)" />
+  </ItemGroup>
+
+  <Target Name="RequireReleaseDescriptorTrustKey" BeforeTargets="CoreCompile"
+          Condition="'$(SerpyReleasePublish)' == 'true' AND '$(SerpyDescriptorTrustKey)' == ''">
+    <Error Text="Release publish requires -p:SerpyDescriptorTrustKey=&lt;base64 SPKI public key&gt; -- the real Serpy publisher's runtime-descriptor signing public key (IR7). Refusing to build a release artifact with no configured production trust anchor for the QEMU runtime descriptor." />
+  </Target>
 </Project>

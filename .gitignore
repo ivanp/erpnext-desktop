@@ -19,3 +19,7 @@ data/
 publish/
 dist/
 __ce-goal-prompt*
+
+# Local dev-only signing material (self-signed test certs, private keys) — never committed
+.local-signing/
+*.pfx
