@@ -374,10 +374,20 @@ static Task WriteFailureResultAsync(Stream stream, string errorMessage, Cancella
 
 static async Task WriteResultAsync(Stream stream, BootstrapWireResult result, CancellationToken ct)
 {
+    // Writing a short JSON line back over an already-connected pipe should
+    // always be fast regardless of how long an earlier READ waited (e.g.
+    // the up-to-90-second wait for the caller's finalize message). A write
+    // bounded by that SAME long-lived token could already be cancelled the
+    // instant the read returns -- silently dropping the very result the
+    // caller is waiting to receive. The incoming token is intentionally
+    // ignored for the deadline: every write gets its own short, fresh
+    // timeout instead, decoupled from however long earlier reads took.
+    _ = ct;
+    using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     var line = JsonSerializer.Serialize(result, BootstrapWireJsonContext.Default.BootstrapWireResult);
     var bytes = Encoding.UTF8.GetBytes(line + "\n");
-    await stream.WriteAsync(bytes, ct);
-    await stream.FlushAsync(ct);
+    await stream.WriteAsync(bytes, writeCts.Token);
+    await stream.FlushAsync(writeCts.Token);
 }
 
 /// <summary>

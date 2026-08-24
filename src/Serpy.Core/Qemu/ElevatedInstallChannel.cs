@@ -47,7 +47,8 @@ public static class ElevatedInstallChannel
         string nonce,
         string installerPath,
         TimeSpan connectTimeout,
-        CancellationToken ct)
+        CancellationToken ct,
+        System.Diagnostics.Process? elevatedProcess = null)
     {
         var client = new NamedPipeClientStream(
             ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -64,7 +65,8 @@ public static class ElevatedInstallChannel
             var result = JsonSerializer.Deserialize(resultLine, BootstrapWireJsonContext.Default.BootstrapWireResult)
                 ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable result.");
 
-            return new ElevatedInstallSession(client, nonce, new BootstrapLaunchResult(result.ExitCode, result.StagingDir));
+            return new ElevatedInstallSession(
+                client, nonce, new BootstrapLaunchResult(result.ExitCode, result.StagingDir), elevatedProcess);
         }
         catch
         {
@@ -98,9 +100,14 @@ public static class ElevatedInstallChannel
 /// tree rather than ever granting it write access to an unvalidated result.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class ElevatedInstallSession(NamedPipeClientStream client, string nonce, BootstrapLaunchResult stagedResult)
+public sealed class ElevatedInstallSession(
+    NamedPipeClientStream client, string nonce, BootstrapLaunchResult stagedResult,
+    System.Diagnostics.Process? elevatedProcess = null)
     : IBootstrapSession
 {
+    private int _finalizeCalled;
+
+
     /// <summary>
     /// Outcome of the helper's initial sequence. When <c>ExitCode</c> is 0,
     /// <c>StagingDir</c> is a tree the requesting user may READ but not
@@ -119,11 +126,18 @@ public sealed class ElevatedInstallSession(NamedPipeClientStream client, string 
     /// </summary>
     public async Task<BootstrapLaunchResult> FinalizeAsync(bool approve, TimeSpan timeout, CancellationToken ct)
     {
+        // The wire protocol is strictly single-shot: the helper reads
+        // exactly one finalize message and then closes. A second call on
+        // the same session would write into an already-closing/closed pipe
+        // and hang or throw a confusing low-level I/O error instead of a
+        // clear programming-error signal, so reject it up front.
+        if (Interlocked.Exchange(ref _finalizeCalled, 1) != 0)
+            throw new InvalidOperationException("FinalizeAsync has already been called on this session.");
+
         var request = new BootstrapFinalizeRequest(nonce, approve);
         var line = JsonSerializer.Serialize(request, BootstrapWireJsonContext.Default.BootstrapFinalizeRequest);
         await client.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), ct);
         await client.FlushAsync(ct);
-
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         var resultLine = await ElevatedInstallChannel.ReadLineAsync(client, linkedCts.Token);
@@ -143,5 +157,34 @@ public sealed class ElevatedInstallSession(NamedPipeClientStream client, string 
     Task<BootstrapLaunchResult> IBootstrapSession.FinalizeAsync(bool approve, CancellationToken ct) =>
         FinalizeAsync(approve, TimeSpan.FromSeconds(90), ct);
 
-    public ValueTask DisposeAsync() => client.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        // Close the client half first: this is what causes the elevated
+        // helper to observe the connection drop (if the protocol never
+        // reached a terminal write) and exit on its own. Only after that
+        // do we confirm the process we launched actually goes away --
+        // without this, a hung or crashed-post-protocol helper process
+        // leaks silently as an orphaned elevated process with nobody
+        // watching its exit code.
+        await client.DisposeAsync();
+
+        if (elevatedProcess is null) return;
+        try
+        {
+            using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await elevatedProcess.WaitForExitAsync(waitCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Best-effort: the wire protocol already completed (or the
+            // caller chose not to finalize); a helper that still hasn't
+            // exited 15s after its pipe closed is unusual but not this
+            // disposal's job to force-kill. Left for process-level
+            // observability rather than silently swallowed forever.
+        }
+        finally
+        {
+            elevatedProcess.Dispose();
+        }
+    }
 }

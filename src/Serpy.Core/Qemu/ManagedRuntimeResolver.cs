@@ -327,7 +327,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         psi.ArgumentList.Add("--installer-path");
         psi.ArgumentList.Add(request.InstallerPath);
 
-        using var proc = Process.Start(psi)
+        var proc = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start Serpy.InstallerBootstrapper.exe.");
 
         // ConnectAsync races the elevated process's own startup (it must
@@ -335,9 +335,20 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         // sequenced after WaitForExitAsync, which would guarantee this
         // never connects before the helper's own wait-for-connection
         // timeout elapses (the helper only exits after this handshake
-        // completes or times out on its own).
-        return await ElevatedInstallChannel.ConnectAsync(
-            request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct);
+        // completes or times out on its own). Ownership of `proc` passes to
+        // the returned session, which waits for its exit on dispose rather
+        // than this method disposing the wrapper (and losing track of the
+        // process) the instant the handshake completes.
+        try
+        {
+            return await ElevatedInstallChannel.ConnectAsync(
+                request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct, proc);
+        }
+        catch
+        {
+            proc.Dispose();
+            throw;
+        }
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
