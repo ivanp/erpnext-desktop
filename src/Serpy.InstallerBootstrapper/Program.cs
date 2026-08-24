@@ -223,15 +223,35 @@ finally
     // reads it during launch below, then it is cleaned up regardless of outcome.
 }
 
-// ── Launch the vendor installer, /D last and unquoted (NSIS requirement) ───
+// ── Create the fresh staging dir ourselves, locked down, BEFORE launching ──
+// the vendor installer (IR3). Only checking-then-launching would leave a
+// TOCTOU window: the unprivileged user controls their own runtime tree and
+// could pre-create the exact staging path as a junction between the check
+// and the vendor installer's own write, redirecting elevated writes
+// somewhere else before the post-install reparse scan ever runs. Instead:
+// validate every existing ancestor is reparse-free and the path stays under
+// the authenticated user's root (ValidateDestinationUnderRoot), THEN create
+// it ourselves with an admin/SYSTEM-only protected DACL so the unprivileged
+// user cannot touch it while the elevated installer is writing. Ownership
+// transfers to the requesting user only after install + the reparse scan
+// below both succeed.
 var stagingDir = Path.Combine(requestingUserRuntimeDir, $".bootstrap-staging-{Guid.NewGuid():N}");
+try
+{
+    BootstrapProtocol.ValidateDestinationUnderRoot(stagingDir, requestingUserRuntimeDir);
+}
+catch (InvalidOperationException ex)
+{
+    await WriteFailureResultAsync(server, ex.Message, cts.Token);
+    return ExitVendorLaunchFailed;
+}
 if (Directory.Exists(stagingDir) || File.Exists(stagingDir))
 {
     await WriteFailureResultAsync(server,
         "Generated staging path already exists; refusing to reuse an existing directory.", cts.Token);
     return ExitVendorLaunchFailed;
 }
-
+StagingHardening.CreateLockedDirectory(stagingDir);
 try
 {
     var psi = new ProcessStartInfo(adminIntermediatePath)
@@ -438,12 +458,25 @@ internal static class StagingHardening
         var root = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "Serpy", "bootstrap-tmp", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        CreateLockedDirectory(root);
+        return root;
+    }
+
+    /// <summary>
+    /// Create <paramref name="path"/> (which must not already exist) and lock
+    /// its DACL to Administrators + SYSTEM only, explicit and non-inherited --
+    /// used both for the admin-only intermediate copy destination and for the
+    /// staging directory the vendor installer writes into, so an unprivileged
+    /// user cannot touch either while this elevated process is using them.
+    /// </summary>
+    public static void CreateLockedDirectory(string path)
+    {
+        Directory.CreateDirectory(path);
 
         var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
 
-        var dirInfo = new DirectoryInfo(root);
+        var dirInfo = new DirectoryInfo(path);
         var security = new DirectorySecurity();
         security.SetOwner(adminsSid);
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
@@ -456,8 +489,6 @@ internal static class StagingHardening
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None, AccessControlType.Allow));
         dirInfo.SetAccessControl(security);
-
-        return root;
     }
 
     /// <summary>Recursively check every file/directory under <paramref name="root"/> for a reparse point.</summary>
