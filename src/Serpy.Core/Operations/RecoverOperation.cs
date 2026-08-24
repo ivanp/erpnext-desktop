@@ -224,7 +224,7 @@ public sealed class RecoverOperation(
 
         var args = new QemuArguments()
             .VmName($"serpy-recover-{operationId:N}")
-            .Machine("q35").Accelerator(accel).Cpu()
+            .Machine("q35").Accelerator(accel).Cpu(accel)
             .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
             .FirmwareDir(runtimeResolver.ShareDir)
             .SystemDisk(SystemImagePath)

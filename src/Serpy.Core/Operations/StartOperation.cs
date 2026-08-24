@@ -107,7 +107,7 @@ public sealed class StartOperation(
 
         var args = new QemuArguments()
             .VmName($"serpy-gen-{generation}")
-            .Machine("q35").Accelerator(accel).Cpu()
+            .Machine("q35").Accelerator(accel).Cpu(accel)
             .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
             .FirmwareDir(runtimeResolver.ShareDir)
             .SystemDisk(state.SystemImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "system.qcow2"))

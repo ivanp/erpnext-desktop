@@ -90,7 +90,7 @@ public sealed class BuildOperation(
 
             var args = new QemuArguments()
                 .VmName("serpy-build")
-                .Machine().Accelerator(accel).Cpu()
+                .Machine().Accelerator(accel).Cpu(accel)
                 .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
                 .FirmwareDir(runtimeResolver.ShareDir)
                 .SystemDisk(StagingPath).Cdrom(SeedIsoPath)

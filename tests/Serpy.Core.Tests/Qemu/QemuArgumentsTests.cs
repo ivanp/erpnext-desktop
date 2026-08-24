@@ -15,6 +15,31 @@ public sealed class QemuArgumentsTests
     }
 
     [Fact]
+    public void Cpu_OnWhpx_DisablesVmxPassthrough()
+    {
+        // WHPX cannot virtualize nested VMX; "-cpu host" on a VT-x host triggers a fatal
+        // "WHPX: Unexpected VP exit code 4" (WHvRunVpExitReasonUnrecoverableException).
+        var args = new QemuArguments().Cpu(WhpxAccel);
+        AssertContainsSequence(args.Args, "-cpu", "host,vmx=off");
+    }
+
+    [Fact]
+    public void Cpu_OnKvm_KeepsFullHostPassthrough()
+    {
+        var kvmAccel = new AcceleratorResult(AcceleratorKind.Kvm, "none", "threads");
+        var args = new QemuArguments().Cpu(kvmAccel);
+        AssertContainsSequence(args.Args, "-cpu", "host");
+    }
+
+    [Fact]
+    public void Cpu_OnHvf_KeepsFullHostPassthrough()
+    {
+        var hvfAccel = new AcceleratorResult(AcceleratorKind.Hvf, "writethrough", "threads");
+        var args = new QemuArguments().Cpu(hvfAccel);
+        AssertContainsSequence(args.Args, "-cpu", "host");
+    }
+
+    [Fact]
     public void DataDisk_SetsCorrectCacheAndAio()
     {
         var args = new QemuArguments().DataDisk("/data/data.img", WhpxAccel);

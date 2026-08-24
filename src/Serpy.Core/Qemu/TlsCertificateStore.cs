@@ -98,12 +98,22 @@ public sealed class TlsCertificateStore
         WritePem(QemuCertDir, "server-key.pem", serverKey.ExportRSAPrivateKeyPem());
     }
 
-    /// <summary>Load the client certificate for use in mTLS connections.</summary>
+    /// <summary>
+    /// Load the client certificate for use in mTLS connections.
+    /// <see cref="X509Certificate2.CreateFromPem(ReadOnlySpan{char}, ReadOnlySpan{char})"/> associates
+    /// an ephemeral, in-memory private key that Windows SChannel cannot use for client-certificate
+    /// authentication: <c>SslStream.AuthenticateAsClientAsync</c> fails at credential acquisition with
+    /// "Authentication failed, see inner exception" / Win32Exception "The credentials supplied to the
+    /// package were not recognized" before any bytes reach the server. Round-tripping through PKCS#12
+    /// forces .NET to import the key via the Windows CNG key store, which SChannel can use.
+    /// </summary>
     public X509Certificate2 LoadClientCert()
     {
         var certPem = File.ReadAllText(Path.Combine(_certDir, "client-cert.pem"));
         var keyPem = File.ReadAllText(Path.Combine(_certDir, "client-key.pem"));
-        return X509Certificate2.CreateFromPem(certPem, keyPem);
+        using var ephemeral = X509Certificate2.CreateFromPem(certPem, keyPem);
+        return X509CertificateLoader.LoadPkcs12(
+            ephemeral.Export(X509ContentType.Pkcs12), password: null);
     }
 
     /// <summary>Load the CA certificate for server validation.</summary>

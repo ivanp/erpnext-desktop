@@ -17,7 +17,15 @@ public sealed class QemuArguments
     public QemuArguments Accelerator(AcceleratorResult accel) =>
         Add("-accel", AcceleratorPolicy.AccelArg(accel.Accelerator));
 
-    public QemuArguments Cpu(string model = "host") => Add("-cpu", model);
+    /// <summary>
+    /// -cpu argument. On WHPX, forcibly disables vmx passthrough: WHPX cannot virtualize
+    /// nested VMX and "-cpu host" (or any model with vmx=on) triggers a fatal
+    /// "WHPX: Unexpected VP exit code 4" (WHvRunVpExitReasonUnrecoverableException) on any
+    /// host whose physical CPU supports VT-x — i.e. effectively always. KVM/HVF hosts are
+    /// unaffected and keep full passthrough.
+    /// </summary>
+    public QemuArguments Cpu(AcceleratorResult accel, string model = "host") =>
+        Add("-cpu", accel.Accelerator == AcceleratorKind.Whpx ? $"{model},vmx=off" : model);
 
     public QemuArguments Smp(int cores) => Add("-smp", cores.ToString());
 

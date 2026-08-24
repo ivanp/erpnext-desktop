@@ -87,7 +87,7 @@ public sealed class InitializeOperation(
 
             var args = new QemuArguments()
                 .VmName($"serpy-init-{operationId:N}")
-                .Machine().Accelerator(accel).Cpu()
+                .Machine().Accelerator(accel).Cpu(accel)
                 .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
                 .FirmwareDir(runtimeResolver.ShareDir)
                 .SystemDisk(SystemImagePath)
