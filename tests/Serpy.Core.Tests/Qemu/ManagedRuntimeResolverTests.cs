@@ -219,10 +219,27 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
 
     private string WriteInstallerSourceFile(byte[] content)
     {
+        var path = Path.Combine(_tempRoot, $"installer-{Guid.NewGuid():N}.exe");
         Directory.CreateDirectory(_tempRoot);
-        var path = Path.Combine(_tempRoot, "qemu-w64-setup.exe");
         File.WriteAllBytes(path, content);
         return path;
+    }
+
+    /// <summary>Trivial fake <see cref="IBootstrapSession"/> for stubbing <see cref="ManagedRuntimeResolver.BootstrapLauncher"/> without a real pipe/process.</summary>
+    private sealed class FakeBootstrapSession(BootstrapLaunchResult stagedResult) : IBootstrapSession
+    {
+        public BootstrapLaunchResult StagedResult { get; } = stagedResult;
+        public int FinalizeCalls { get; private set; }
+
+        public Task<BootstrapLaunchResult> FinalizeAsync(bool approve, CancellationToken ct)
+        {
+            FinalizeCalls++;
+            return Task.FromResult(approve
+                ? new BootstrapLaunchResult(0, StagedResult.StagingDir)
+                : new BootstrapLaunchResult(1, null));
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -267,7 +284,7 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             },
         })
         {
-            BootstrapLauncher = (_, _) => Task.FromResult(new BootstrapLaunchResult(ExitCode: 5, StagingDir: null)),
+            BootstrapLauncher = (_, _) => Task.FromResult<IBootstrapSession>(new FakeBootstrapSession(new BootstrapLaunchResult(ExitCode: 5, StagingDir: null))),
         };
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => resolver.InstallAsync());
@@ -292,7 +309,7 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             },
         })
         {
-            BootstrapLauncher = (_, _) => Task.FromResult(new BootstrapLaunchResult(ExitCode: 0, StagingDir: null)),
+            BootstrapLauncher = (_, _) => Task.FromResult<IBootstrapSession>(new FakeBootstrapSession(new BootstrapLaunchResult(ExitCode: 0, StagingDir: null))),
         };
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => resolver.InstallAsync());
@@ -346,7 +363,7 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             BootstrapLauncher = (_, _) =>
             {
                 launcherCalls++;
-                return Task.FromResult(new BootstrapLaunchResult(0, "unused"));
+                return Task.FromResult<IBootstrapSession>(new FakeBootstrapSession(new BootstrapLaunchResult(0, "unused")));
             },
         };
 
@@ -379,7 +396,7 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             resolver.BootstrapLauncher = (_, _) =>
             {
                 launcherCalls++;
-                return Task.FromResult(new BootstrapLaunchResult(0, "x"));
+                return Task.FromResult<IBootstrapSession>(new FakeBootstrapSession(new BootstrapLaunchResult(0, "x")));
             };
 
             var outcome = await resolver.InstallAsync();

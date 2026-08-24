@@ -211,6 +211,90 @@ public sealed class StagingHardeningTests : IDisposable
         Assert.True(ownerHasFullControl);
     }
 
+    [Fact]
+    public void GrantReadOnlyAccess_GrantsReadExecuteOnly_OwnerRemainsAdministrators()
+    {
+        // The pre-finalize handoff state (IR3): the requesting user must be
+        // able to READ the staged tree to validate it, but must NOT be able
+        // to write/delete/rename anything in it -- otherwise any OTHER
+        // process running under that same user's SID could tamper with the
+        // tree while the legitimate caller is still validating it, exactly
+        // the TOCTOU class this two-phase handoff exists to close.
+        var stagingRoot = Path.Combine(_root, "readonly-staging");
+        Directory.CreateDirectory(stagingRoot);
+        var nestedDir = Path.Combine(stagingRoot, "nested");
+        Directory.CreateDirectory(nestedDir);
+        var nestedFile = Path.Combine(nestedDir, "qemu-system-x86_64.exe");
+        File.WriteAllText(nestedFile, "installed content");
+
+        var userSid = WindowsIdentity.GetCurrent().User!;
+        StagingHardening.GrantReadOnlyAccess(stagingRoot, userSid);
+
+        var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+        // Owner is NOT transferred at this phase -- Administrators still owns
+        // the tree; the user only has an explicit access grant, not ownership.
+        var rootOwner = (SecurityIdentifier)new DirectoryInfo(stagingRoot).GetAccessControl().GetOwner(typeof(SecurityIdentifier))!;
+        Assert.Equal(adminsSid, rootOwner);
+
+        foreach (var (path, isDir) in new[] { (stagingRoot, true), (nestedDir, true), (nestedFile, false) })
+        {
+            var rules = isDir
+                ? new DirectoryInfo(path).GetAccessControl().GetAccessRules(true, false, typeof(SecurityIdentifier))
+                : new FileInfo(path).GetAccessControl().GetAccessRules(true, false, typeof(SecurityIdentifier));
+
+            var userRule = rules.Cast<FileSystemAccessRule>().SingleOrDefault(r =>
+                r.AccessControlType == AccessControlType.Allow &&
+                ((SecurityIdentifier)r.IdentityReference).Equals(userSid));
+            Assert.True(userRule is not null, $"Expected an access grant for the user on '{path}'.");
+
+            // Never any write-capable right -- matches the same write-capable
+            // mask concept RunKeyAutostart.IsWriteCapable checks for the
+            // analogous "must not be writable" guard elsewhere in this repo.
+            const FileSystemRights writeCapable =
+                FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete |
+                FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions |
+                FileSystemRights.TakeOwnership | FileSystemRights.WriteAttributes | FileSystemRights.WriteExtendedAttributes;
+            Assert.Equal(0, (int)(userRule!.FileSystemRights & writeCapable));
+            Assert.True(userRule.FileSystemRights.HasFlag(FileSystemRights.ReadAndExecute));
+        }
+    }
+
+    [Fact]
+    public void GrantReadOnlyAccess_ThenHardenOwnership_TransitionsToFullControlOnlyAfterFinalize()
+    {
+        // Directly exercises the production sequence (IR3): stage as
+        // read-only first, then -- only after the caller's own validation
+        // succeeds and reports approval -- transition to full ownership.
+        // Proves the ACL genuinely changes state at each phase rather than
+        // granting write access up front and merely claiming it happens later.
+        var stagingRoot = Path.Combine(_root, "transition-staging");
+        Directory.CreateDirectory(stagingRoot);
+        var nestedFile = Path.Combine(stagingRoot, "qemu-system-x86_64.exe");
+        File.WriteAllText(nestedFile, "installed content");
+
+        var userSid = WindowsIdentity.GetCurrent().User!;
+        var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+        StagingHardening.GrantReadOnlyAccess(stagingRoot, userSid);
+        var ownerBeforeFinalize = (SecurityIdentifier)new FileInfo(nestedFile).GetAccessControl().GetOwner(typeof(SecurityIdentifier))!;
+        Assert.Equal(adminsSid, ownerBeforeFinalize);
+        var rulesBeforeFinalize = new FileInfo(nestedFile).GetAccessControl()
+            .GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>();
+        Assert.DoesNotContain(rulesBeforeFinalize, r =>
+            ((SecurityIdentifier)r.IdentityReference).Equals(userSid) &&
+            r.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+
+        StagingHardening.HardenOwnership(stagingRoot, userSid);
+        var ownerAfterFinalize = (SecurityIdentifier)new FileInfo(nestedFile).GetAccessControl().GetOwner(typeof(SecurityIdentifier))!;
+        Assert.Equal(userSid, ownerAfterFinalize);
+        var rulesAfterFinalize = new FileInfo(nestedFile).GetAccessControl()
+            .GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>();
+        Assert.Contains(rulesAfterFinalize, r =>
+            ((SecurityIdentifier)r.IdentityReference).Equals(userSid) &&
+            r.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+    }
+
     private static void CreateJunction(string junctionPath, string targetPath)
     {
         var psi = new ProcessStartInfo("cmd.exe")

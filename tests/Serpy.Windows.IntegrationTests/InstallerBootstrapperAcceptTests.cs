@@ -73,8 +73,9 @@ public sealed class InstallerBootstrapperAcceptTests
         try
         {
             using var cts = new CancellationTokenSource(connectTimeout);
-            var result = await ElevatedInstallChannel.ConnectAndAwaitResultAsync(
+            await using var session = await ElevatedInstallChannel.ConnectAsync(
                 pipeName, clientNonce, clientInstallerPath, connectTimeout, cts.Token);
+            var result = session.StagedResult;
             wireResult = new BootstrapWireResult(result.ExitCode, result.StagingDir, null);
         }
         catch (Exception ex)

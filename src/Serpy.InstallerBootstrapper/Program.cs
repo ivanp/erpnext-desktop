@@ -252,20 +252,75 @@ try
         return ExitReparsePointDetected;
     }
 
+    // ── Two-phase handoff (IR3): read-only staged result first ─────────────
+    // Granting write access immediately would let anything running under
+    // the requesting user's own SID (not just this legitimate resolver
+    // call) mutate the tree while the caller is still validating it --
+    // reopening the same TOCTOU class this whole design exists to close,
+    // just moved into the unelevated validation window. Ownership/write
+    // access transfers only after the caller reports a successful
+    // validation over this SAME authenticated connection.
+    StagingHardening.GrantReadOnlyAccess(stagingDir, claimedSid);
+
+    var stagedResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
+    await WriteResultAsync(server, stagedResult, cts.Token);
+
+    // The caller's own validation (ValidateContents/-version/TLS probe)
+    // spawns real subprocesses and can take longer than the connection's
+    // original budget -- a separate, more generous timeout governs waiting
+    // for the finalize message specifically.
+    using var finalizeCts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+    string finalizeLine;
+    try
+    {
+        finalizeLine = await ReadLineAsync(server, finalizeCts.Token);
+    }
+    catch (Exception ex) when (ex is OperationCanceledException or IOException or EndOfStreamException)
+    {
+        return ExitVendorLaunchFailed; // no one left to write a result to; staging cleaned up below
+    }
+
+    BootstrapFinalizeRequest finalize;
+    try
+    {
+        finalize = JsonSerializer.Deserialize(finalizeLine, BootstrapWireJsonContext.Default.BootstrapFinalizeRequest)
+            ?? throw new InvalidDataException("Empty finalize message.");
+    }
+    catch (JsonException)
+    {
+        await WriteFailureResultAsync(server, "Malformed finalize message. Refusing to proceed.", cts.Token);
+        return ExitAuthFailed;
+    }
+
+    if (!BootstrapProtocol.NoncesMatch(expectedNonce, finalize.Nonce))
+    {
+        await WriteFailureResultAsync(server,
+            "Finalize message nonce does not match the authenticated session. Refusing to proceed.", cts.Token);
+        return ExitAuthFailed;
+    }
+
+    if (!finalize.Approve)
+    {
+        await WriteFailureResultAsync(server,
+            "Caller reported validation failure; staging tree discarded without granting write access.", cts.Token);
+        return ExitVendorLaunchFailed;
+    }
+
+    // Only now, after an authenticated approval, does ownership transfer.
     StagingHardening.HardenOwnership(stagingDir, claimedSid);
 
     succeeded = true;
-    var successResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
-    await WriteResultAsync(server, successResult, cts.Token);
+    var finalResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
+    await WriteResultAsync(server, finalResult, cts.Token);
     return 0;
 }
 finally
 {
-    // Cleaned up regardless of which exit path was taken (SHA mismatch,
-    // vendor launch failure, reparse detection) EXCEPT on success, where the
-    // staging directory is the deliberate handoff to the non-elevated
-    // resolver and must survive this process's exit. The admin-only
-    // intermediate installer copy is always throwaway, success or not.
+    // The admin-only intermediate is a throwaway copy the vendor installer
+    // reads from during launch -- cleaned up here regardless of which exit
+    // path was taken. The staging directory is cleaned up here too UNLESS
+    // finalization succeeded, where it is the deliberate handoff to the
+    // non-elevated resolver and must survive this process's exit.
     if (adminIntermediatePath is not null)
     {
         try { File.Delete(adminIntermediatePath); } catch (IOException) { }
@@ -545,6 +600,68 @@ internal static class StagingHardening
         }
         reparsePointPath = null;
         return false;
+    }
+
+    /// <summary>
+    /// Grant <paramref name="userSid"/> read+execute (never write) on the
+    /// staging tree, WITHOUT changing ownership away from Administrators
+    /// (IR3): this is the pre-finalize handoff state -- the staging tree
+    /// must be inspectable by the requesting user's own validation call
+    /// (<c>ValidateContents</c>/<c>-version</c>/TLS probe) without being
+    /// mutable by anything else running under that same SID while
+    /// validation is in progress. Full ownership/write access is granted
+    /// only later, by <see cref="HardenOwnership"/>, after the caller
+    /// reports a successful validation over the authenticated pipe.
+    /// </summary>
+    public static void GrantReadOnlyAccess(string stagingRoot, SecurityIdentifier userSid)
+    {
+        var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+
+        ApplyReadOnlyAcl(stagingRoot, isDirectory: true, userSid, adminsSid, systemSid);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(stagingRoot, "*", SearchOption.AllDirectories))
+        {
+            var isDirectory = File.GetAttributes(entry).HasFlag(FileAttributes.Directory);
+            ApplyReadOnlyAcl(entry, isDirectory, userSid, adminsSid, systemSid);
+        }
+    }
+
+    private static void ApplyReadOnlyAcl(
+        string path, bool isDirectory,
+        SecurityIdentifier userSid, SecurityIdentifier adminsSid, SecurityIdentifier systemSid)
+    {
+        if (isDirectory)
+        {
+            var security = new DirectorySecurity();
+            security.SetOwner(adminsSid);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                userSid, FileSystemRights.ReadAndExecute | FileSystemRights.ListDirectory,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                adminsSid, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                systemSid, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(path).SetAccessControl(security);
+        }
+        else
+        {
+            var security = new FileSecurity();
+            security.SetOwner(adminsSid);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                userSid, FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                adminsSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(security);
+        }
     }
 
     /// <summary>

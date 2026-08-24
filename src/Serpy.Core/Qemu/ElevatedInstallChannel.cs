@@ -16,43 +16,64 @@ namespace Serpy.Core.Qemu;
 /// This class only ever runs after the elevated helper process has already
 /// been started (see <c>ManagedRuntimeResolver.DefaultBootstrapLauncher</c>);
 /// it does not itself elevate or launch anything.
+///
+/// The handoff is two-phase (IR3), not single-shot: after the helper's
+/// initial copy/re-verify/launch/reparse-scan sequence, the staging tree is
+/// handed back READ-ONLY to the requesting user -- granting write access
+/// immediately would let anything running under that same user's SID mutate
+/// the tree while the caller is still validating it. Only after the caller
+/// reports its own validation outcome via <see cref="ElevatedInstallSession.FinalizeAsync"/>
+/// does the helper grant full ownership/write access (or delete the tree, on
+/// a declined/failed validation).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class ElevatedInstallChannel
 {
     /// <summary>
-    /// Connect to the elevated helper's named pipe, send the nonce + installer
-    /// path, and await its final result. Throws <see cref="TimeoutException"/>
-    /// if the helper never accepts a connection within <paramref name="connectTimeout"/>
-    /// (e.g. it crashed or was never started), and <see cref="InvalidDataException"/>
-    /// if the helper's response cannot be parsed.
+    /// Connect to the elevated helper's named pipe and send the nonce +
+    /// installer path. Returns a still-open <see cref="ElevatedInstallSession"/>
+    /// whose <see cref="ElevatedInstallSession.StagedResult"/> reports the
+    /// outcome of the helper's initial sequence. If that result's
+    /// <c>ExitCode</c> is nonzero, the helper has already sent its terminal
+    /// message and closed -- the caller must NOT call
+    /// <see cref="ElevatedInstallSession.FinalizeAsync"/> in that case. Throws
+    /// <see cref="TimeoutException"/>-style pipe exceptions if the helper
+    /// never accepts a connection within <paramref name="connectTimeout"/>
+    /// (e.g. it crashed or was never started), and
+    /// <see cref="InvalidDataException"/> if its response cannot be parsed.
     /// </summary>
-    public static async Task<BootstrapLaunchResult> ConnectAndAwaitResultAsync(
+    public static async Task<ElevatedInstallSession> ConnectAsync(
         string pipeName,
         string nonce,
         string installerPath,
         TimeSpan connectTimeout,
         CancellationToken ct)
     {
-        await using var client = new NamedPipeClientStream(
+        var client = new NamedPipeClientStream(
             ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        try
+        {
+            await client.ConnectAsync((int)connectTimeout.TotalMilliseconds, ct);
 
-        await client.ConnectAsync((int)connectTimeout.TotalMilliseconds, ct);
+            var hello = new BootstrapClientHello(nonce, installerPath);
+            var helloLine = JsonSerializer.Serialize(hello, BootstrapWireJsonContext.Default.BootstrapClientHello);
+            await client.WriteAsync(Encoding.UTF8.GetBytes(helloLine + "\n"), ct);
+            await client.FlushAsync(ct);
 
-        var hello = new BootstrapClientHello(nonce, installerPath);
-        var helloLine = JsonSerializer.Serialize(hello, BootstrapWireJsonContext.Default.BootstrapClientHello);
-        var helloBytes = Encoding.UTF8.GetBytes(helloLine + "\n");
-        await client.WriteAsync(helloBytes, ct);
-        await client.FlushAsync(ct);
+            var resultLine = await ReadLineAsync(client, ct);
+            var result = JsonSerializer.Deserialize(resultLine, BootstrapWireJsonContext.Default.BootstrapWireResult)
+                ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable result.");
 
-        var resultLine = await ReadLineAsync(client, ct);
-        var result = JsonSerializer.Deserialize(resultLine, BootstrapWireJsonContext.Default.BootstrapWireResult)
-            ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable result.");
-
-        return new BootstrapLaunchResult(result.ExitCode, result.StagingDir);
+            return new ElevatedInstallSession(client, nonce, new BootstrapLaunchResult(result.ExitCode, result.StagingDir));
+        }
+        catch
+        {
+            await client.DisposeAsync();
+            throw;
+        }
     }
 
-    private static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
+    internal static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
     {
         var buffer = new List<byte>();
         var single = new byte[1];
@@ -66,4 +87,61 @@ public static class ElevatedInstallChannel
         }
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
+}
+
+/// <summary>
+/// A still-open connection to the elevated bootstrapper, after its initial
+/// copy/re-verify/launch/reparse-scan sequence but before ownership of the
+/// staging tree has transferred (IR3). Must be finalized (approved or
+/// declined) or disposed; disposing without finalizing leaves the helper's
+/// own connection-drop handling to clean up the still-admin-owned staging
+/// tree rather than ever granting it write access to an unvalidated result.
+/// </summary>
+[SupportedOSPlatform("windows")]
+public sealed class ElevatedInstallSession(NamedPipeClientStream client, string nonce, BootstrapLaunchResult stagedResult)
+    : IBootstrapSession
+{
+    /// <summary>
+    /// Outcome of the helper's initial sequence. When <c>ExitCode</c> is 0,
+    /// <c>StagingDir</c> is a tree the requesting user may READ but not
+    /// write -- call <see cref="FinalizeAsync"/> after validating it. When
+    /// nonzero, the helper has already sent its terminal message and closed;
+    /// do not call <see cref="FinalizeAsync"/>.
+    /// </summary>
+    public BootstrapLaunchResult StagedResult { get; } = stagedResult;
+
+    /// <summary>
+    /// Report the caller's own validation outcome for the staged tree.
+    /// <paramref name="approve"/> true grants the requesting user full
+    /// ownership/write access to the staging tree (only now, after
+    /// validation passed); false tells the helper to delete it instead of
+    /// ever making it writable. Returns the helper's final result.
+    /// </summary>
+    public async Task<BootstrapLaunchResult> FinalizeAsync(bool approve, TimeSpan timeout, CancellationToken ct)
+    {
+        var request = new BootstrapFinalizeRequest(nonce, approve);
+        var line = JsonSerializer.Serialize(request, BootstrapWireJsonContext.Default.BootstrapFinalizeRequest);
+        await client.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), ct);
+        await client.FlushAsync(ct);
+
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        var resultLine = await ElevatedInstallChannel.ReadLineAsync(client, linkedCts.Token);
+        var result = JsonSerializer.Deserialize(resultLine, BootstrapWireJsonContext.Default.BootstrapWireResult)
+            ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable final result.");
+
+        return new BootstrapLaunchResult(result.ExitCode, result.StagingDir);
+    }
+
+    /// <summary>
+    /// <see cref="IBootstrapSession"/> explicit-shape overload: the caller's
+    /// own validation (ValidateContents/-version/TLS probe) can take real
+    /// time, so this uses a generous 90-second default matching the
+    /// server-side wait, rather than tying finalize's own network-read
+    /// timeout to the caller's possibly much shorter cancellation token.
+    /// </summary>
+    Task<BootstrapLaunchResult> IBootstrapSession.FinalizeAsync(bool approve, CancellationToken ct) =>
+        FinalizeAsync(approve, TimeSpan.FromSeconds(90), ct);
+
+    public ValueTask DisposeAsync() => client.DisposeAsync();
 }

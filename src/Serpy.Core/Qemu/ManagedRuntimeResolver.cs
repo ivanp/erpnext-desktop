@@ -58,7 +58,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
     /// <see cref="System.ComponentModel.Win32Exception"/> on UAC decline (mirrors
     /// <c>WhpxEnabler.EnableAndRequestRestart</c>).
     /// </summary>
-    internal Func<BootstrapRequest, CancellationToken, Task<BootstrapLaunchResult>> BootstrapLauncher { get; set; }
+    internal Func<BootstrapRequest, CancellationToken, Task<IBootstrapSession>> BootstrapLauncher { get; set; }
         = DefaultBootstrapLauncher;
 
     /// <summary>
@@ -188,10 +188,10 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
                 ClaimedOriginalUserSid: CurrentUserSid());
 
             progress?.Report("Waiting for administrator approval…");
-            BootstrapLaunchResult result;
+            IBootstrapSession session;
             try
             {
-                result = await BootstrapLauncher(request, ct);
+                session = await BootstrapLauncher(request, ct);
             }
             catch (System.ComponentModel.Win32Exception)
             {
@@ -199,25 +199,55 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
                 return InstallOutcome.ElevationDeclined;
             }
 
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException(
-                    $"Elevated QEMU install failed with exit code {result.ExitCode}.");
-            if (string.IsNullOrWhiteSpace(result.StagingDir) || !Directory.Exists(result.StagingDir))
-                throw new InvalidOperationException(
-                    "Elevated install reported success but returned no valid staging directory.");
+            await using (session)
+            {
+                var staged = session.StagedResult;
+                if (staged.ExitCode != 0)
+                    throw new InvalidOperationException(
+                        $"Elevated QEMU install failed with exit code {staged.ExitCode}.");
+                if (string.IsNullOrWhiteSpace(staged.StagingDir) || !Directory.Exists(staged.StagingDir))
+                    throw new InvalidOperationException(
+                        "Elevated install reported success but returned no valid staging directory.");
 
-            var stagingDir = result.StagingDir;
-            progress?.Report("Validating installed contents…");
-            ValidateContents(stagingDir);
-            var stagingExe = Path.Combine(stagingDir, "qemu-system-x86_64.exe");
-            var versionOutput = await WhpxProbe.GetVersionAsync(stagingExe, ct);
-            if (!versionOutput.Contains("QEMU emulator version", StringComparison.OrdinalIgnoreCase) ||
-                !versionOutput.Contains(manifest.QemuVersion, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Version mismatch: installer reports '{versionOutput.Trim()}'.");
-            await ProbeHasTlsAsync(stagingExe, ResolveFirmwareDir(stagingDir), ct);
-            CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
-            progress?.Report($"QEMU runtime installed: {versionOutput.Trim()}");
-            return InstallOutcome.Installed;
+                var stagingDir = staged.StagingDir;
+
+                // Two-phase handoff (IR3): the tree is read-only to this process
+                // until FinalizeAsync reports a successful validation below --
+                // granting write access before validating would let anything
+                // else running under this same user account mutate the tree
+                // mid-validation, reopening the exact TOCTOU class the elevated
+                // helper's own admin-owned staging exists to close.
+                Exception? validationFailure = null;
+                string? versionOutput = null;
+                try
+                {
+                    progress?.Report("Validating installed contents…");
+                    ValidateContents(stagingDir);
+                    var stagingExe = Path.Combine(stagingDir, "qemu-system-x86_64.exe");
+                    versionOutput = await WhpxProbe.GetVersionAsync(stagingExe, ct);
+                    if (!versionOutput.Contains("QEMU emulator version", StringComparison.OrdinalIgnoreCase) ||
+                        !versionOutput.Contains(manifest.QemuVersion, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Version mismatch: installer reports '{versionOutput.Trim()}'.");
+                    await ProbeHasTlsAsync(stagingExe, ResolveFirmwareDir(stagingDir), ct);
+                }
+                catch (Exception ex)
+                {
+                    validationFailure = ex;
+                }
+
+                var finalResult = await session.FinalizeAsync(approve: validationFailure is null, ct);
+
+                if (validationFailure is not null)
+                    throw validationFailure;
+                if (finalResult.ExitCode != 0)
+                    throw new InvalidOperationException(
+                        $"Elevated install approved locally but the helper's final ACL grant failed " +
+                        $"with exit code {finalResult.ExitCode}.");
+
+                CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
+                progress?.Report($"QEMU runtime installed: {versionOutput!.Trim()}");
+                return InstallOutcome.Installed;
+            }
         }
         finally
         {
@@ -247,7 +277,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
     /// helper hosts as server (<see cref="ElevatedInstallChannel"/>) to send
     /// the nonce/installer path and await its authenticated result.
     /// </summary>
-    private static async Task<BootstrapLaunchResult> DefaultBootstrapLauncher(
+    private static async Task<IBootstrapSession> DefaultBootstrapLauncher(
         BootstrapRequest request, CancellationToken ct)
     {
         if (!OperatingSystem.IsWindows())
@@ -300,16 +330,14 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         using var proc = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start Serpy.InstallerBootstrapper.exe.");
 
-        // Started concurrently with the exit-wait below: the elevated helper
-        // only exits after it has already written its result to the pipe, so
-        // connecting must not be sequenced after WaitForExitAsync (that would
-        // guarantee the client never connects before the helper's own
-        // internal wait-for-connection timeout elapses).
-        var channelTask = ElevatedInstallChannel.ConnectAndAwaitResultAsync(
+        // ConnectAsync races the elevated process's own startup (it must
+        // create its pipe server before this can connect); it is not
+        // sequenced after WaitForExitAsync, which would guarantee this
+        // never connects before the helper's own wait-for-connection
+        // timeout elapses (the helper only exits after this handshake
+        // completes or times out on its own).
+        return await ElevatedInstallChannel.ConnectAsync(
             request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct);
-
-        await proc.WaitForExitAsync(ct);
-        return await channelTask;
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -550,3 +578,21 @@ public sealed record BootstrapRequest(
 /// <c>ValidateContents</c>/<c>-version</c>/TLS against before committing.
 /// </summary>
 public sealed record BootstrapLaunchResult(int ExitCode, string? StagingDir);
+
+/// <summary>
+/// A still-open elevated-install session (IR3): the launcher seam's return
+/// type. <see cref="StagedResult"/> reports the outcome of the helper's
+/// initial copy/re-verify/launch/reparse-scan sequence -- when its
+/// <c>ExitCode</c> is 0, <c>StagingDir</c> is READ-ONLY to the caller until
+/// <see cref="FinalizeAsync"/> reports a successful validation, closing the
+/// window a single-shot "hand off already-writable" design would leave open
+/// for anything else running under the same requesting-user SID to mutate
+/// the tree mid-validation. Tests substitute a trivial fake implementation;
+/// production uses <see cref="ElevatedInstallSession"/> (the real
+/// pipe-backed session).
+/// </summary>
+internal interface IBootstrapSession : IAsyncDisposable
+{
+    BootstrapLaunchResult StagedResult { get; }
+    Task<BootstrapLaunchResult> FinalizeAsync(bool approve, CancellationToken ct);
+}
