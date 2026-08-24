@@ -23,3 +23,6 @@ __ce-goal-prompt*
 # Local dev-only signing material (self-signed test certs, private keys) — never committed
 .local-signing/
 *.pfx
+
+# WiX Toolset local extension cache (per-repo, from `wix extension add`)
+.wix/

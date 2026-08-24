@@ -253,8 +253,15 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("Elevated QEMU install is Windows-only.");
 
+        // Installed in its own subfolder, not flat alongside Serpy.App.exe:
+        // both projects reference Serpy.Core and each ships its own copy of
+        // Serpy.Core.dll (and other shared deps) in a framework-dependent
+        // publish; a flat shared install directory would collide on those
+        // filenames (harvested MSI components) and installing over one
+        // another's dependency copies is exactly the kind of subtle bug
+        // this separation avoids.
         var bootstrapperExePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Serpy",
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Serpy", "Bootstrapper",
             "Serpy.InstallerBootstrapper.exe");
 
         if (!File.Exists(bootstrapperExePath))

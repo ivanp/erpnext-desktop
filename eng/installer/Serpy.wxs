@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Serpy MSI installer (IU3/IR5/IKD3). Installs per-machine to
+  %ProgramFiles%\Serpy: Serpy.App.exe (Native-AOT publish output, including
+  config/versions.yaml, cloud-init/*, guest/* copied in by Serpy.App.csproj),
+  the separate signed Serpy.InstallerBootstrapper.exe (IR3/IKTD1) and its
+  admin-protected signed runtime descriptor, plus docs. Creates a Start-menu
+  shortcut and registers an Apps & Features uninstall entry. Does NOT run the
+  QEMU installer or WHPX enablement — first launch drives that via
+  SetupOperation (IKTD2), so the MSI's single elevation never nests with the
+  QEMU installer's own UAC prompt.
+
+  Built via `wix build` (see build-msi.ps1), not an MSBuild .wixproj:
+    wix build Serpy.wxs -arch x64 -ext WixToolset.Util.wixext
+      -d AppPublishDir=&lt;path&gt; -d BootstrapperPublishDir=&lt;path&gt;
+      -d RepoRoot=&lt;path&gt; -d ProductVersion=&lt;version&gt; [-d DescriptorPath=&lt;path&gt;]
+      -out Serpy.msi
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Serpy"
+           Manufacturer="Serpy Dev"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="96d90a65-ce76-4481-8b22-122735a4bf54"
+           Scope="perMachine">
+
+    <SummaryInformation Description="Serpy -- headless Debian/ERPNext appliance host" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Serpy is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="Serpy" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="BootstrapperFiles" />
+      <ComponentGroupRef Id="DocFiles" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Serpy">
+        <!--
+          Serpy.InstallerBootstrapper.exe lives in its own subfolder, not
+          flat alongside Serpy.App.exe: both projects reference Serpy.Core
+          and each ships its own copy of Serpy.Core.dll (and other shared
+          deps) in a framework-dependent publish — a flat shared install
+          directory collides on those filenames. ManagedRuntimeResolver's
+          expected bootstrapper path must match this exactly.
+        -->
+        <Directory Id="BOOTSTRAPPERFOLDER" Name="Bootstrapper" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuSerpyFolder" Name="Serpy" />
+    </StandardDirectory>
+  </Fragment>
+
+  <!--
+    Serpy.App.exe is harvested explicitly (not via the wildcard glob below)
+    so the Start-menu shortcut can target it by File Id ([#SerpyAppExe]).
+    Everything else Serpy.App.csproj copies into its own publish output
+    (config/versions.yaml, cloud-init/*, guest/*, the app's own DLLs/assets)
+    is harvested by the wildcard — this is the same publish directory
+    eng/package-windows.ps1 validates as a complete distribution.
+  -->
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Component Id="SerpyAppExeComponent">
+        <File Id="SerpyAppExe" Source="$(var.AppPublishDir)\Serpy.App.exe" KeyPath="yes" Checksum="yes" />
+      </Component>
+      <Files Include="$(var.AppPublishDir)\**">
+        <Exclude Files="$(var.AppPublishDir)\Serpy.App.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <!--
+    The separate signed elevated helper (IR3/IKTD1) and its admin-protected
+    signed runtime descriptor (IR3/IKTD3) — both land in the same admin-only
+    %ProgramFiles%\Serpy tree a non-admin user cannot rewrite. DescriptorPath
+    is optional: a local/dev build without a signed descriptor still
+    produces a working MSI, but the installed bootstrapper fails closed at
+    the descriptor-load step until a real signed descriptor is provisioned
+    (see SignedRuntimeDescriptorFile), matching this repo's existing
+    fail-closed-not-fake-success convention.
+  -->
+  <Fragment>
+    <ComponentGroup Id="BootstrapperFiles" Directory="BOOTSTRAPPERFOLDER">
+      <Files Include="$(var.BootstrapperPublishDir)\**" />
+      <?ifdef DescriptorPath?>
+      <Component Id="SignedDescriptorComponent">
+        <File Id="SignedDescriptorFile" Source="$(var.DescriptorPath)" Name="runtime-descriptor.signed.json" KeyPath="yes" />
+      </Component>
+      <?endif?>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="DocFiles" Directory="INSTALLFOLDER">
+      <Component Id="ReadmeComponent">
+        <File Id="ReadmeFile" Source="$(var.RepoRoot)\README.md" KeyPath="yes" />
+      </Component>
+      <Files Include="$(var.RepoRoot)\docs\third-party\**" Directory="INSTALLFOLDER" Subdirectory="docs\third-party" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="StartMenuShortcutComponent" Guid="8f6c7f0e-2f2f-4b62-9f8b-2d6a9c1e6b7f">
+        <Shortcut Id="SerpyStartMenuShortcut"
+                  Name="Serpy"
+                  Directory="StartMenuSerpyFolder"
+                  Target="[#SerpyAppExe]"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveStartMenuSerpyFolder" Directory="StartMenuSerpyFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\Serpy" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
