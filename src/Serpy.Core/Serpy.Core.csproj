@@ -45,4 +45,29 @@
           Condition="'$(SerpyReleasePublish)' == 'true' AND '$(SerpyDescriptorTrustKey)' == ''">
     <Error Text="Release publish requires -p:SerpyDescriptorTrustKey=&lt;base64 SPKI public key&gt; -- the real Serpy publisher's runtime-descriptor signing public key (IR7). Refusing to build a release artifact with no configured production trust anchor for the QEMU runtime descriptor." />
   </Target>
+
+  <!--
+    Helper publisher anchor (IR7): the expected Authenticode subject of the
+    elevated Serpy.InstallerBootstrapper.exe is a build input, never a source
+    literal — see HelperPublisherAnchor.cs. Same SerpyReleasePublish
+    fail-closed / local-dev-convenience split as the descriptor trust key
+    above; the local-dev value is a fixed literal (not file content) because
+    it just IS eng/gen-test-signing-cert.ps1's default -Subject, gated on the
+    local test cert actually existing.
+  -->
+  <PropertyGroup>
+    <_SerpyLocalDevPublisherCertPath>$(MSBuildThisFileDirectory)..\..\.local-signing\serpy-test-signing.pfx</_SerpyLocalDevPublisherCertPath>
+    <SerpyHelperPublisherSubject Condition="'$(SerpyHelperPublisherSubject)' == '' AND '$(SerpyReleasePublish)' != 'true' AND Exists('$(_SerpyLocalDevPublisherCertPath)')">CN=Serpy Test Publisher, O=Serpy Dev, C=US</SerpyHelperPublisherSubject>
+    <SerpyHelperPublisherSubjectSource Condition="'$(SerpyHelperPublisherSubjectSource)' == '' AND '$(SerpyHelperPublisherSubject)' != ''">local-dev-test-cert</SerpyHelperPublisherSubjectSource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="SerpyHelperPublisherSubject" Value="$(SerpyHelperPublisherSubject)" />
+    <AssemblyMetadata Include="SerpyHelperPublisherSubjectSource" Value="$(SerpyHelperPublisherSubjectSource)" />
+  </ItemGroup>
+
+  <Target Name="RequireReleaseHelperPublisherSubject" BeforeTargets="CoreCompile"
+          Condition="'$(SerpyReleasePublish)' == 'true' AND '$(SerpyHelperPublisherSubject)' == ''">
+    <Error Text="Release publish requires -p:SerpyHelperPublisherSubject=&lt;subject&gt; -- the real Serpy publisher's Authenticode subject for the elevated bootstrapper (IR7). Refusing to build a release artifact with no configured production publisher anchor." />
+  </Target>
 </Project>

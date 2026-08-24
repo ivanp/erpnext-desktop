@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!--
+    This is a separate, minimal, elevated-only executable (IR3/IKTD1) —
+    never linked into Serpy.App.exe. It hosts the authenticated named-pipe
+    server, verifies the runtime descriptor, and performs the actual
+    `runas`-elevated copy/re-verify/launch of the vendor QEMU installer.
+    It is Windows-only end to end: named pipes with ACL/impersonation,
+    Authenticode verification, and NSIS installer launch are all Win32-only
+    concerns, so AssemblyInfo.cs marks the whole assembly
+    [SupportedOSPlatform("windows")] rather than per-file.
+
+    The pipe server's DACL is built via a direct CreateNamedPipeW P/Invoke
+    (see Program.cs) rather than the System.IO.Pipes.AccessControl package:
+    that package's reference assembly did not resolve cleanly against this
+    SDK's plain net10.0 targeting pack in this environment, and this repo's
+    existing convention for Win32-security-sensitive code (HelperSignatureVerifier's
+    WinVerifyTrust) is direct P/Invoke over an indirect wrapper anyway.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Serpy.Core\Serpy.Core.csproj" />
+  </ItemGroup>
+</Project>

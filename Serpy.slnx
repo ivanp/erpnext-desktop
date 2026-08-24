@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Serpy.App/Serpy.App.csproj" />
     <Project Path="src/Serpy.Core/Serpy.Core.csproj" />
+    <Project Path="src/Serpy.InstallerBootstrapper/Serpy.InstallerBootstrapper.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Serpy.App.Tests/Serpy.App.Tests.csproj" />

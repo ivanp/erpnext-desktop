@@ -237,22 +237,73 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
     /// <summary>
     /// Real default launcher for the elevated install bootstrapper.
     ///
-    /// <b>Not yet implemented.</b> <c>Serpy.InstallerBootstrapper.exe</c> — the separate
-    /// signed executable that hosts the authenticated named pipe, verifies the signed
-    /// descriptor, and performs the actual `runas`-elevated copy/re-verify/launch (IR3/
-    /// IKTD1) — does not exist as a project yet. This launcher therefore fails closed
-    /// <b>before any elevation attempt</b>: it must never reach <c>Process.Start</c> with
-    /// <c>Verb="runas"</c>, because prompting UAC and then failing afterward would be a
-    /// disguised stub reachable through a live elevation path. Once
-    /// <c>Serpy.InstallerBootstrapper</c> exists, this method is replaced with the real
-    /// pipe-authenticated launch; until then, callers get an explicit, honest failure.
+    /// Fails closed <b>before any elevation attempt</b> in two cases: the
+    /// helper is not installed at its expected admin-only Program Files path
+    /// (IR3/IKTD1), or this build has no configured publisher anchor
+    /// (<see cref="HelperPublisherAnchor"/>) to verify it against. Only once
+    /// <see cref="HelperSignatureVerifier"/> confirms the installed helper is
+    /// Authenticode-signed by the expected publisher (IR7) does this launch
+    /// it with <c>Verb="runas"</c>, then connects to the pipe the elevated
+    /// helper hosts as server (<see cref="ElevatedInstallChannel"/>) to send
+    /// the nonce/installer path and await its authenticated result.
     /// </summary>
-    private static Task<BootstrapLaunchResult> DefaultBootstrapLauncher(
-        BootstrapRequest request, CancellationToken ct) =>
-        throw new NotSupportedException(
-            "Elevated QEMU install is not available: the separate signed " +
-            "Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) has not been built yet. " +
-            "No UAC elevation was attempted.");
+    private static async Task<BootstrapLaunchResult> DefaultBootstrapLauncher(
+        BootstrapRequest request, CancellationToken ct)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Elevated QEMU install is Windows-only.");
+
+        var bootstrapperExePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Serpy",
+            "Serpy.InstallerBootstrapper.exe");
+
+        if (!File.Exists(bootstrapperExePath))
+            throw new NotSupportedException(
+                "Elevated QEMU install is not available: the separate signed " +
+                $"Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) is not installed at " +
+                $"'{bootstrapperExePath}'. No UAC elevation was attempted.");
+
+        var expectedSubject = HelperPublisherAnchor.ExpectedSubject
+            ?? throw new InvalidOperationException(
+                "No helper publisher anchor is configured for this build " +
+                "(SerpyHelperPublisherSubject was not set at build time). This build cannot " +
+                "verify Serpy.InstallerBootstrapper.exe's signature and must not elevate it.");
+
+        var verification = HelperSignatureVerifier.Verify(bootstrapperExePath, expectedSubject);
+        if (!verification.IsValid)
+            throw new InvalidOperationException(
+                $"Refusing to elevate Serpy.InstallerBootstrapper.exe: signature verification " +
+                $"failed against expected publisher '{expectedSubject}' " +
+                $"(source: {HelperPublisherAnchor.Source ?? "unknown"}). {verification.Message}");
+
+        var psi = new ProcessStartInfo(bootstrapperExePath)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+        };
+        psi.ArgumentList.Add("--pipe-name");
+        psi.ArgumentList.Add(request.PipeName);
+        psi.ArgumentList.Add("--nonce");
+        psi.ArgumentList.Add(request.Nonce);
+        psi.ArgumentList.Add("--claimed-sid");
+        psi.ArgumentList.Add(request.ClaimedOriginalUserSid);
+        psi.ArgumentList.Add("--installer-path");
+        psi.ArgumentList.Add(request.InstallerPath);
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start Serpy.InstallerBootstrapper.exe.");
+
+        // Started concurrently with the exit-wait below: the elevated helper
+        // only exits after it has already written its result to the pipe, so
+        // connecting must not be sequenced after WaitForExitAsync (that would
+        // guarantee the client never connects before the helper's own
+        // internal wait-for-connection timeout elapses).
+        var channelTask = ElevatedInstallChannel.ConnectAndAwaitResultAsync(
+            request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct);
+
+        await proc.WaitForExitAsync(ct);
+        return await channelTask;
+    }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 

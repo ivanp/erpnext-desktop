@@ -22,9 +22,14 @@ namespace Serpy.Windows.IntegrationTests;
 [SupportedOSPlatform("windows")]
 public sealed class HelperSignatureVerifierAcceptTests
 {
-    private const string TestPfxPassword = "serpy-test-only";
     private const string TestSubject = "CN=Serpy Test Publisher, O=Serpy Dev, C=US";
 
+    /// <summary>
+    /// The test cert's PFX password lives in a gitignored sibling file written
+    /// by <c>eng/gen-test-signing-cert.ps1</c> -- never hardcoded in source,
+    /// even for a throwaway test fixture (this is a source-scanning habit worth
+    /// keeping, not a real secret leak, since the cert itself is disposable).
+    /// </summary>
     private static string? FindLocalSigningDir()
     {
         var dir = AppContext.BaseDirectory;
@@ -32,7 +37,8 @@ public sealed class HelperSignatureVerifierAcceptTests
         {
             var candidate = Path.Combine(dir, ".local-signing");
             if (Directory.Exists(candidate) &&
-                File.Exists(Path.Combine(candidate, "serpy-test-signing.pfx")))
+                File.Exists(Path.Combine(candidate, "serpy-test-signing.pfx")) &&
+                File.Exists(Path.Combine(candidate, "serpy-test-signing.pfx.password")))
                 return candidate;
         }
         return null;
@@ -46,7 +52,8 @@ public sealed class HelperSignatureVerifierAcceptTests
 
         var pfxPath = Path.Combine(signingDir, "serpy-test-signing.pfx");
         var cerPath = Path.Combine(signingDir, "serpy-test-signing.cer");
-        using var cert = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, TestPfxPassword, X509KeyStorageFlags.Exportable);
+        var pfxPassword = File.ReadAllText(Path.Combine(signingDir, "serpy-test-signing.pfx.password")).Trim();
+        using var cert = X509CertificateLoader.LoadPkcs12FromFile(pfxPath, pfxPassword, X509KeyStorageFlags.Exportable);
 
         var rootImported = false;
         var publisherImported = false;
@@ -75,7 +82,7 @@ public sealed class HelperSignatureVerifierAcceptTests
             signedExe = Path.Combine(Path.GetTempPath(), $"serpy-sig-accept-{Guid.NewGuid():N}.dll");
             File.Copy(sourceExe, signedExe);
 
-            RunPowerShellSign(signedExe, pfxPath, TestPfxPassword);
+            RunPowerShellSign(signedExe, pfxPath, pfxPassword);
 
             var result = HelperSignatureVerifier.Verify(signedExe, TestSubject);
 
