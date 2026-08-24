@@ -78,6 +78,46 @@ jobs:
           path: dist/
           retention-days: 30
 
+      - name: Publish Serpy.InstallerBootstrapper (IR3/IKTD1)
+        run: |
+          dotnet publish src/Serpy.InstallerBootstrapper/Serpy.InstallerBootstrapper.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -o publish/bootstrapper-win-x64
+
+      - name: Assert bootstrapper executable
+        run: |
+          if (-not (Test-Path 'publish/bootstrapper-win-x64/Serpy.InstallerBootstrapper.exe')) {
+            throw 'Missing Serpy.InstallerBootstrapper.exe from publish output.'
+          }
+
+      - name: Install WiX v5 (not v7+, which requires an EULA fee unsuited to CI)
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add WixToolset.Util.wixext/5.0.2
+
+      - name: Build Serpy MSI
+        # No production descriptor-signing key or Authenticode certificate is
+        # provisioned in this repo's CI yet (IR7/IU3's signing pipeline is a
+        # documented, not-yet-delivered follow-on -- see docs/results.md).
+        # -AllowMissingDescriptor produces a real, structurally complete MSI
+        # whose installed bootstrapper honestly fails closed at first-run
+        # setup rather than silently claiming a working install; this is not
+        # the release artifact until a real signing key/cert exist.
+        run: |
+          ./eng/installer/build-msi.ps1 `
+            -AppPublishDir publish/win-x64 `
+            -BootstrapperPublishDir publish/bootstrapper-win-x64 `
+            -OutputPath dist/Serpy.msi `
+            -Version "0.0.0" `
+            -AllowMissingDescriptor
+
+      - name: Upload Windows MSI (unsigned dev build -- not a release artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: serpy-msi-unsigned-dev
+          path: dist/Serpy.msi
+          retention-days: 30
+
   publish-extension-targets:
     name: ${{ matrix.name }} target publish
     runs-on: ${{ matrix.runner }}

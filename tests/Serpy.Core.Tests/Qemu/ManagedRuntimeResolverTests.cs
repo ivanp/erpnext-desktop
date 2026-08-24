@@ -302,7 +302,9 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
     [Fact]
     public async Task InstallAsync_DefaultLauncher_FailsClosedBeforeAnyElevationAttempt()
     {
-        // Serpy.InstallerBootstrapper.exe (IR3/IKTD1) does not exist as a project yet.
+        // Serpy.InstallerBootstrapper.exe (IR3/IKTD1) is a real project now, but this
+        // test environment has nothing installed at the real launcher's expected
+        // %ProgramFiles%\Serpy\Bootstrapper path (only an MSI install puts it there).
         // The default launcher must fail before ever calling Process.Start with
         // Verb="runas" -- a UAC-prompt-then-fail sequence would be a disguised stub
         // reachable through a live elevation path, which is not acceptable.

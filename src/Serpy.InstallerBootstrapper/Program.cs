@@ -149,29 +149,6 @@ if (!string.Equals(hello.InstallerPath, installerPath, StringComparison.OrdinalI
     return ExitAuthFailed;
 }
 
-// Derive the requesting user's runtime directory under their OWN
-// impersonated identity (never a path this process merely believes belongs
-// to that SID). KnownPaths.RuntimeDir CANNOT be used here: AppDataRoot is a
-// static property initializer, evaluated exactly once for this process's
-// whole lifetime on first access -- calling it inside RunAsClient would
-// return whatever identity resolved it FIRST (this elevated process's own
-// admin profile, from some earlier access), not the impersonated client's.
-// Environment.GetFolderPath has no such caching and re-resolves against
-// whatever token is current on this thread right now.
-string? requestingUserRuntimeDir = null;
-server.RunAsClient(() =>
-{
-    var localAppData = Environment.GetFolderPath(
-        Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create);
-    requestingUserRuntimeDir = Path.Combine(localAppData, "Serpy", "runtime");
-});
-if (requestingUserRuntimeDir is null)
-{
-    await WriteFailureResultAsync(server,
-        "Could not resolve the requesting user's runtime directory.", cts.Token);
-    return ExitAuthFailed;
-}
-
 // ── Verify the runtime descriptor (IR3/IKTD3) ───────────────────────────────
 // The signed descriptor ships as an admin-protected sibling file next to
 // this executable -- the same MSI-install/tamper protection the helper
@@ -202,7 +179,9 @@ catch (Exception ex) when (ex is IOException or InvalidOperationException or Jso
 // hashing the COPY, closes that window: nothing but this process could have
 // written the bytes being verified.
 var adminIntermediateDir = StagingHardening.CreateAdminOnlyDirectory();
-string adminIntermediatePath;
+string? adminIntermediatePath = null;
+string? stagingDir = null;
+var succeeded = false;
 try
 {
     adminIntermediatePath = Path.Combine(adminIntermediateDir, Path.GetFileName(installerPath));
@@ -216,44 +195,26 @@ try
             $"Expected {descriptor.InstallerSha256}, got {actualSha256}. Refusing to launch.", cts.Token);
         return ExitShaMismatch;
     }
-}
-finally
-{
-    // The admin-only intermediate is a throwaway copy; the vendor installer
-    // reads it during launch below, then it is cleaned up regardless of outcome.
-}
 
-// ── Create the fresh staging dir ourselves, locked down, BEFORE launching ──
-// the vendor installer (IR3). Only checking-then-launching would leave a
-// TOCTOU window: the unprivileged user controls their own runtime tree and
-// could pre-create the exact staging path as a junction between the check
-// and the vendor installer's own write, redirecting elevated writes
-// somewhere else before the post-install reparse scan ever runs. Instead:
-// validate every existing ancestor is reparse-free and the path stays under
-// the authenticated user's root (ValidateDestinationUnderRoot), THEN create
-// it ourselves with an admin/SYSTEM-only protected DACL so the unprivileged
-// user cannot touch it while the elevated installer is writing. Ownership
-// transfers to the requesting user only after install + the reparse scan
-// below both succeed.
-var stagingDir = Path.Combine(requestingUserRuntimeDir, $".bootstrap-staging-{Guid.NewGuid():N}");
-try
-{
-    BootstrapProtocol.ValidateDestinationUnderRoot(stagingDir, requestingUserRuntimeDir);
-}
-catch (InvalidOperationException ex)
-{
-    await WriteFailureResultAsync(server, ex.Message, cts.Token);
-    return ExitVendorLaunchFailed;
-}
-if (Directory.Exists(stagingDir) || File.Exists(stagingDir))
-{
-    await WriteFailureResultAsync(server,
-        "Generated staging path already exists; refusing to reuse an existing directory.", cts.Token);
-    return ExitVendorLaunchFailed;
-}
-StagingHardening.CreateLockedDirectory(stagingDir);
-try
-{
+    // ── Stage entirely inside the admin-only ProgramData tree (IR3) ────────
+    // The staging output is NEVER created under the requesting user's own
+    // profile: that path is user-writable at every ancestor level, and no
+    // path-string-based creation (however carefully validated beforehand)
+    // can be made safe against the user replacing an ancestor with a
+    // junction between validation and creation -- a real TOCTOU
+    // privilege-escalation primitive, not a theoretical one. Instead, the
+    // entire elevated sequence (copy, verify, vendor install, reparse scan,
+    // ownership grant) happens inside a fresh, atomically-created,
+    // admin/SYSTEM-only directory directly under %ProgramData% (itself a
+    // stable, OS-protected anchor no non-admin can delete or replace). The
+    // existing NON-ELEVATED resolver
+    // (ManagedRuntimeResolver.CommitValidatedBundle) already moves whatever
+    // staging path this reports into the user's own runtime directory as an
+    // unelevated operation -- a non-elevated process following a
+    // user-controlled junction can only ever act with the user's own
+    // permissions, so no privilege escalation is possible even if the
+    // user's own tree is later booby-trapped at that final, unelevated step.
+    stagingDir = StagingHardening.CreateAdminOnlyDirectory();
     var psi = new ProcessStartInfo(adminIntermediatePath)
     {
         UseShellExecute = false,
@@ -273,35 +234,49 @@ try
             $"Vendor installer exited with code {vendorProcess.ExitCode}.", cts.Token);
         return ExitVendorLaunchFailed;
     }
+
+    if (!Directory.Exists(stagingDir))
+    {
+        await WriteFailureResultAsync(server,
+            "Vendor installer exited zero but produced no staging directory.", cts.Token);
+        return ExitVendorLaunchFailed;
+    }
+
+    // ── Validate no reparse points, then ACL-harden the staging tree (IR3) ─
+    if (StagingHardening.ContainsReparsePoint(stagingDir, out var reparsePointPath))
+    {
+        await WriteFailureResultAsync(server,
+            $"Staging tree contains a reparse point at '{reparsePointPath}'; refusing to hand off " +
+            "an installed tree that could redirect elsewhere once ownership transfers.",
+            cts.Token);
+        return ExitReparsePointDetected;
+    }
+
+    StagingHardening.HardenOwnership(stagingDir, claimedSid);
+
+    succeeded = true;
+    var successResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
+    await WriteResultAsync(server, successResult, cts.Token);
+    return 0;
 }
 finally
 {
-    try { File.Delete(adminIntermediatePath); } catch (IOException) { }
+    // Cleaned up regardless of which exit path was taken (SHA mismatch,
+    // vendor launch failure, reparse detection) EXCEPT on success, where the
+    // staging directory is the deliberate handoff to the non-elevated
+    // resolver and must survive this process's exit. The admin-only
+    // intermediate installer copy is always throwaway, success or not.
+    if (adminIntermediatePath is not null)
+    {
+        try { File.Delete(adminIntermediatePath); } catch (IOException) { }
+    }
     try { Directory.Delete(adminIntermediateDir); } catch (IOException) { }
+    if (!succeeded && stagingDir is not null && Directory.Exists(stagingDir))
+    {
+        try { Directory.Delete(stagingDir, recursive: true); } catch (IOException) { }
+    }
 }
 
-if (!Directory.Exists(stagingDir))
-{
-    await WriteFailureResultAsync(server,
-        "Vendor installer exited zero but produced no staging directory.", cts.Token);
-    return ExitVendorLaunchFailed;
-}
-
-// ── Validate no reparse points, then ACL-harden the staging tree (IR3) ─────
-if (StagingHardening.ContainsReparsePoint(stagingDir, out var reparsePointPath))
-{
-    await WriteFailureResultAsync(server,
-        $"Staging tree contains a reparse point at '{reparsePointPath}'; refusing to hand off " +
-        "an installed tree that could redirect outside the requesting user's runtime directory.",
-        cts.Token);
-    return ExitReparsePointDetected;
-}
-
-StagingHardening.HardenOwnership(stagingDir, claimedSid);
-
-var successResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
-await WriteResultAsync(server, successResult, cts.Token);
-return 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -448,48 +423,105 @@ internal static class NativePipe
 internal static class StagingHardening
 {
     /// <summary>
-    /// Create a fresh directory under <c>%ProgramData%\Serpy\bootstrap-tmp</c>
-    /// whose DACL grants access ONLY to Administrators and SYSTEM -- explicit,
-    /// non-inherited, so %ProgramData%'s own (often broader) default DACL
-    /// cannot leave it writable by a non-admin user.
+    /// Create a fresh directory directly under <c>%ProgramData%</c> whose DACL
+    /// grants access ONLY to Administrators and SYSTEM -- explicit,
+    /// non-inherited. Deliberately ONE level directly under %ProgramData%
+    /// itself (never <c>%ProgramData%\Serpy\...</c> multi-level nesting):
+    /// %ProgramData% is a stable, OS-protected anchor no non-admin can
+    /// delete or replace, but any *subfolder* under it (e.g. a "Serpy"
+    /// folder) would itself need to already exist with a hardened ACL
+    /// before it could be trusted the same way -- and creating THAT
+    /// non-atomically at runtime would just move the TOCTOU race up one
+    /// level instead of closing it. Single-level creation directly under
+    /// the anchor is what makes <see cref="CreateLockedDirectory"/>'s
+    /// atomic-with-baked-in-DACL creation actually sufficient.
     /// </summary>
     public static string CreateAdminOnlyDirectory()
     {
         var root = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "Serpy", "bootstrap-tmp", Guid.NewGuid().ToString("N"));
+            $"Serpy-Bootstrap-{Guid.NewGuid():N}");
         CreateLockedDirectory(root);
         return root;
     }
 
     /// <summary>
-    /// Create <paramref name="path"/> (which must not already exist) and lock
-    /// its DACL to Administrators + SYSTEM only, explicit and non-inherited --
-    /// used both for the admin-only intermediate copy destination and for the
-    /// staging directory the vendor installer writes into, so an unprivileged
-    /// user cannot touch either while this elevated process is using them.
+    /// Atomically create <paramref name="path"/> -- which must not already
+    /// exist and whose PARENT must already exist as a stable, trusted anchor
+    /// (this never creates missing ancestors) -- with its admin/SYSTEM-only
+    /// DACL baked into the <c>CreateDirectoryW</c> call itself, not applied
+    /// afterward via a separate <c>SetAccessControl</c>. Creating first with
+    /// a default/inherited (often user-writable) ACL and locking it down as
+    /// a second step would leave a privileged race window between those two
+    /// operations; passing the security descriptor directly means the
+    /// object is never observable in an unprotected state.
+    /// <c>CreateDirectoryW</c> reports <c>ERROR_ALREADY_EXISTS</c> when it
+    /// loses a race against another creator, which this treats as fatal
+    /// rather than swallowing (unlike <see cref="Directory.CreateDirectory(string)"/>,
+    /// which is silently idempotent for an existing directory).
     /// </summary>
     public static void CreateLockedDirectory(string path)
     {
-        Directory.CreateDirectory(path);
+        var parent = Path.GetDirectoryName(path)
+            ?? throw new ArgumentException("Path has no parent directory.", nameof(path));
+        if (!Directory.Exists(parent))
+            throw new DirectoryNotFoundException(
+                $"Refusing to create '{path}': its parent '{parent}' does not already exist as a " +
+                "trusted anchor. This method never creates missing ancestors -- doing so " +
+                "non-atomically would only move the TOCTOU race up one path level.");
 
         var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
 
-        var dirInfo = new DirectoryInfo(path);
-        var security = new DirectorySecurity();
-        security.SetOwner(adminsSid);
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new FileSystemAccessRule(
-            adminsSid, FileSystemRights.FullControl,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None, AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(
-            systemSid, FileSystemRights.FullControl,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None, AccessControlType.Allow));
-        dirInfo.SetAccessControl(security);
+        var dacl = new DiscretionaryAcl(isContainer: true, isDS: false, capacity: 2);
+        dacl.AddAccess(AccessControlType.Allow, adminsSid, unchecked((int)FileSystemRights.FullControl),
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None);
+        dacl.AddAccess(AccessControlType.Allow, systemSid, unchecked((int)FileSystemRights.FullControl),
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None);
+        var csd = new CommonSecurityDescriptor(
+            isContainer: true, isDS: false, ControlFlags.None,
+            owner: adminsSid, group: null, systemAcl: null, discretionaryAcl: dacl);
+        var sdBytes = new byte[csd.BinaryLength];
+        csd.GetBinaryForm(sdBytes, 0);
+
+        var sdHandle = GCHandle.Alloc(sdBytes, GCHandleType.Pinned);
+        try
+        {
+            var sa = new DirSecurityAttributes
+            {
+                Length = Marshal.SizeOf<DirSecurityAttributes>(),
+                SecurityDescriptor = sdHandle.AddrOfPinnedObject(),
+                InheritHandle = 0,
+            };
+            if (!CreateDirectoryW(path, ref sa))
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error == ErrorAlreadyExists)
+                    throw new IOException(
+                        $"Refusing to use staging path '{path}': it already exists. " +
+                        "This must never happen for a freshly generated path and indicates either a " +
+                        "GUID collision or a TOCTOU race by another process.");
+                throw new Win32Exception(error, $"CreateDirectoryW failed for '{path}'.");
+            }
+        }
+        finally
+        {
+            sdHandle.Free();
+        }
     }
+
+    private const int ErrorAlreadyExists = 183;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DirSecurityAttributes
+    {
+        public int Length;
+        public IntPtr SecurityDescriptor;
+        public int InheritHandle;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CreateDirectoryW(string lpPathName, ref DirSecurityAttributes lpSecurityAttributes);
 
     /// <summary>Recursively check every file/directory under <paramref name="root"/> for a reparse point.</summary>
     public static bool ContainsReparsePoint(string root, out string? reparsePointPath)
