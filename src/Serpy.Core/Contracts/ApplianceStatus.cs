@@ -25,6 +25,15 @@ public enum HealthState
 }
 
 /// <summary>
+/// Recommended first-run / launch routing signal for the VM.
+/// </summary>
+public enum LaunchRoute
+{
+    Start = 0,
+    Setup = 1,
+}
+
+/// <summary>
 /// Combined, observable surface status the UI binds to.
 /// </summary>
 public sealed record ApplianceStatus(
@@ -33,7 +42,10 @@ public sealed record ApplianceStatus(
     string? LoopbackUrl,
     string? CurrentStage,
     OperationKind? ActiveOperation,
-    int? ProgressPercent);
+    int? ProgressPercent,
+    bool HasCommittedDataOnDisk = false,
+    bool ArchiveHasProvenanceRecord = false,
+    LaunchRoute RecommendedRoute = LaunchRoute.Start);
 
 public enum OperationKind
 {
@@ -43,4 +55,7 @@ public enum OperationKind
     Stop,
     Restart,
     Recover,
+    BuildPreservingData,
+    InspectArchive,
+    Adopt,
 }

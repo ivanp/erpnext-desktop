@@ -89,6 +89,33 @@ public sealed class ApplianceServiceContractTests : IDisposable
 
         Assert.Equal(OperationKind.Recover, status.ActiveOperation);
     }
+    [Fact]
+    public void RecordAcceptedBuild_WithDataInState_SetsReadinessToInitialized()
+    {
+        var store = MakeStore(s =>
+        {
+            s.Readiness = ReadinessState.NotBuilt;
+            s.DataImagePath = Path.Combine(_dir, "data.img");
+        });
+
+        BuildOperation.RecordAcceptedBuild(store, Path.Combine(_dir, "system.qcow2"));
+
+        var state = store.Read();
+        Assert.Equal(ReadinessState.Initialized, state.Readiness);
+        Assert.Equal(Path.Combine(_dir, "data.img"), state.DataImagePath);
+    }
+
+    [Fact]
+    public void RecordAcceptedBuild_NoData_SetsReadinessToBuilt()
+    {
+        var store = MakeStore(s => s.Readiness = ReadinessState.NotBuilt);
+
+        BuildOperation.RecordAcceptedBuild(store, Path.Combine(_dir, "system.qcow2"));
+
+        var state = store.Read();
+        Assert.Equal(ReadinessState.Built, state.Readiness);
+        Assert.Null(state.DataImagePath);
+    }
 
     // ── LifecycleLock busy detection ──────────────────────────────────────
 
@@ -236,5 +263,18 @@ public sealed class ApplianceServiceBuildReadinessTests
         };
 
         Assert.False(ApplianceService.CanBuildFrom(state, committedDataExists: false));
+    }
+    [Fact]
+    public void CanBuildPreservingDataFrom_DataPresent_ReturnsTrue()
+    {
+        var state = new ApplianceState { Readiness = ReadinessState.Initialized, DataImagePath = "C:\\Serpy\\appliance\\data.img" };
+        Assert.True(ApplianceService.CanBuildPreservingDataFrom(state, committedDataExists: true));
+    }
+
+    [Fact]
+    public void CanBuildPreservingDataFrom_NoData_ReturnsFalse()
+    {
+        var state = new ApplianceState { Readiness = ReadinessState.NotBuilt };
+        Assert.False(ApplianceService.CanBuildPreservingDataFrom(state, committedDataExists: false));
     }
 }

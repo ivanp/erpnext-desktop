@@ -49,13 +49,20 @@ public sealed class QemuArguments
         Add("-drive", $"file={isoPath},media=cdrom,readonly=on");
 
     // ── Network ──────────────────────────────────────────────────────────
-
     /// <summary>
     /// QEMU user-mode NAT: forward host:<paramref name="hostPort"/> → guest :80 (nginx).
     /// No bridge, no LAN exposure.
     /// </summary>
     public QemuArguments UserNetWithPortForward(int hostPort) =>
         Add("-netdev", $"user,id=net0,hostfwd=tcp:127.0.0.1:{hostPort}-:80")
+        .Add("-device", "virtio-net-pci,netdev=net0");
+
+    /// <summary>
+    /// Isolated QEMU user-mode NAT with restrict=on (KTD9): no outbound guest network access.
+    /// Host port forward allowed for local trial health check.
+    /// </summary>
+    public QemuArguments UserNetRestricted(int hostPort) =>
+        Add("-netdev", $"user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:{hostPort}-:80")
         .Add("-device", "virtio-net-pci,netdev=net0");
 
     // ── Display ───────────────────────────────────────────────────────────

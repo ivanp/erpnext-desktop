@@ -16,6 +16,14 @@ public interface IApplianceService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Download, verify, and provision system.qcow2 while preserving an existing data.img if present.
+    /// Routes around CanBuildFrom; does not migrate or adopt data (that is AdoptAsync).
+    /// </summary>
+    Task<OperationResult> BuildPreservingDataAsync(
+        IProgress<OperationUpdate> progress,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create data.img, initialize MariaDB datadir, create first Frappe site.
     /// Runs R11 functional health check before committing.
     /// Valid from: ReadinessState.Built
@@ -56,6 +64,26 @@ public interface IApplianceService
     /// </summary>
     Task<OperationResult> RecoverAsync(
         string replacementImagePath,
+        IProgress<OperationUpdate> progress,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// One-time non-mutating inspection of an archive for provenance and version compatibility.
+    /// Decrypts DPAPI metadata only; never reads the archive file body.
+    /// </summary>
+    Task<ArchiveInspection> InspectArchiveAsync(
+        string archivePath,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Migrate and activate an archived dataset via a disposable working copy.
+    /// On health pass + clean halt, atomically promotes to data.img (journaled).
+    /// On failure, discards copy, persists nothing, archive is retained untouched.
+    /// </summary>
+    Task<OperationResult> AdoptAsync(
+        AdoptParameters parameters,
+        ArchiveInspection inspection,
+        bool legacyConsentApproved,
         IProgress<OperationUpdate> progress,
         CancellationToken ct = default);
 

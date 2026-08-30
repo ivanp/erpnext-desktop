@@ -78,6 +78,13 @@ public sealed class ApplianceState
     /// </summary>
     [JsonPropertyName("recoveryJournal")]
     public RecoveryJournal? RecoveryJournal { get; set; }
+
+    /// <summary>
+    /// Adoption journal: set when an adopt operation starts, cleared on success.
+    /// Blocks normal start if non-null (an interrupted dataset adoption must be completed).
+    /// </summary>
+    [JsonPropertyName("adoptionJournal")]
+    public AdoptionJournal? AdoptionJournal { get; set; }
 }
 
 /// <summary>
@@ -108,6 +115,41 @@ public sealed class RecoveryJournal
 
     [JsonPropertyName("benchMigrated")]
     public bool BenchMigrated { get; set; }
+
+    [JsonPropertyName("healthPassed")]
+    public bool HealthPassed { get; set; }
+}
+
+public enum AdoptionStage
+{
+    ReadyToCommit = 0,
+    DataPromoted = 1,
+    StateCommitted = 2,
+    CredentialStored = 3,
+}
+
+/// <summary>
+/// Durable record of an adoption operation's phases (KTD9).
+/// </summary>
+public sealed class AdoptionJournal
+{
+    [JsonPropertyName("stage")]
+    public AdoptionStage Stage { get; set; } = AdoptionStage.ReadyToCommit;
+
+    [JsonPropertyName("archivePath")]
+    public string ArchivePath { get; set; } = string.Empty;
+
+    [JsonPropertyName("pendingDataPath")]
+    public string PendingDataPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("committedDataPath")]
+    public string CommittedDataPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("expectedDigest")]
+    public string? ExpectedDigest { get; set; }
+
+    [JsonPropertyName("computedDigest")]
+    public string? ComputedDigest { get; set; }
 
     [JsonPropertyName("healthPassed")]
     public bool HealthPassed { get; set; }

@@ -48,8 +48,10 @@ public sealed class App : Application
         _dashboardVm.ShowDashboardRequested += (_, _) => ShowDashboardWindow();
         _dashboardVm.ExitRequested         += (_, _) => HandleExitRequest();
         _dashboardVm.OpenUrlRequested      += (_, url) => _browser.OpenOnce(url);
-        _dashboardVm.CredentialInputRequested = RequestCredentialsAsync;
-        _dashboardVm.RecoverInputRequested = RequestRecoveryImageAsync;
+        _dashboardVm.SetupInputRequested           = RequestSetupChoiceAsync;
+        _dashboardVm.CredentialInputRequested      = RequestCredentialsAsync;
+        _dashboardVm.RecoverInputRequested         = RequestRecoveryImageAsync;
+        _dashboardVm.LegacyConsentInputRequested   = RequestLegacyConsentAsync;
         if (Service is not null)
             _dashboardVm.SetService(Service);
         _dashboardVm.OperationUpdated += (_, update) => _splashVm?.ApplyUpdate(update);
@@ -200,13 +202,30 @@ public sealed class App : Application
             .ShowDialog<ExitWhileRunningChoice>(_dashboardWindow);
     }
 
+    private async Task<SetupChoice?> RequestSetupChoiceAsync()
+    {
+        if (_dashboardWindow is null) ShowDashboardWindow();
+        if (_dashboardWindow is null) return null; // headless/test lifetime
+        bool hasData = _dashboardVm?.Status.HasCommittedDataOnDisk ?? false;
+        var dialog = new InitializeDialog(hasCommittedDataOnDisk: hasData);
+        return await dialog.ShowDialog<SetupChoice?>(_dashboardWindow);
+    }
     private async Task<InitializationParameters?> RequestCredentialsAsync()
     {
         // Show the initialization credential dialog on the UI thread.
         if (_dashboardWindow is null) ShowDashboardWindow();
         if (_dashboardWindow is null) return null; // headless/test lifetime
-        var dialog = new InitializeDialog();
-        return await dialog.ShowDialog<InitializationParameters?>(_dashboardWindow);
+        var dialog = new InitializeDialog(allowChoice: false);
+        var result = await dialog.ShowDialog<SetupChoice?>(_dashboardWindow);
+        return result is SetupChoice.CreateNew createNew ? createNew.Parameters : null;
+    }
+
+    private async Task<bool> RequestLegacyConsentAsync(ArchiveInspection inspection)
+    {
+        if (_dashboardWindow is null) ShowDashboardWindow();
+        if (_dashboardWindow is null) return false;
+        var dialog = new RecoveryConfirmationDialog(inspection.CanonicalPath);
+        return await dialog.ShowDialog<bool>(_dashboardWindow);
     }
 
     private async Task<string?> RequestRecoveryImageAsync()

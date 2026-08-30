@@ -100,6 +100,9 @@ $extensions = wix extension list 2>&1
 if ($extensions -notmatch 'WixToolset\.Util\.wixext') {
     wix extension add WixToolset.Util.wixext/5.0.2 | Out-Null
 }
+if ($extensions -notmatch 'WixToolset\.UI\.wixext') {
+    wix extension add WixToolset.UI.wixext/5.0.2 | Out-Null
+}
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputPath) | Out-Null
 
@@ -107,6 +110,7 @@ $buildArgs = @(
     'build', $wxsPath,
     '-arch', 'x64',
     '-ext', 'WixToolset.Util.wixext',
+    '-ext', 'WixToolset.UI.wixext',
     '-d', "AppPublishDir=$appPublish",
     '-d', "BootstrapperPublishDir=$bootstrapperPublish",
     '-d', "RepoRoot=$repoRoot",

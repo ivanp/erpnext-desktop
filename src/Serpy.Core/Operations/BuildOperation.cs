@@ -44,18 +44,25 @@ public sealed class BuildOperation(
     private string FinalPath    => Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
     private string ManifestPath => Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
     private string SeedIsoPath  => Path.Combine(KnownPaths.ApplianceDir, ".cloud-init-seed.iso");
+    public async Task<OperationResult> ExecuteAsync(
+        Guid operationId,
+        IProgress<OperationUpdate> progress,
+        CancellationToken ct) =>
+        await ExecuteAsync(operationId, progress, preserveData: false, ct);
 
     public async Task<OperationResult> ExecuteAsync(
         Guid operationId,
         IProgress<OperationUpdate> progress,
+        bool preserveData,
         CancellationToken ct)
     {
+        var opKind = preserveData ? OperationKind.BuildPreservingData : OperationKind.Build;
         Directory.CreateDirectory(KnownPaths.ApplianceDir);
         Directory.CreateDirectory(KnownPaths.LogsDir);
         var logPath = Path.Combine(KnownPaths.LogsDir, $"build-{operationId:N}.log");
 
         void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info) =>
-            progress.Report(new OperationUpdate(operationId, OperationKind.Build, stage, sev, msg, pct, null));
+            progress.Report(new OperationUpdate(operationId, opKind, stage, sev, msg, pct, null));
 
         try
         {
@@ -125,7 +132,7 @@ public sealed class BuildOperation(
             if (!sentinel.Found)
             {
                 await KillAndClean(proc, ct);
-                return Fail(operationId, "Cloud-init did not complete within 2 hours.", logPath);
+                return Fail(operationId, opKind, "Cloud-init did not complete within 2 hours.", logPath);
             }
 
             // 8. QGA version gate (R9)
@@ -144,7 +151,7 @@ public sealed class BuildOperation(
             {
                 await KillAndClean(proc, ct);
                 RemoveStaging();
-                return Fail(operationId,
+                return Fail(operationId, opKind,
                     $"Version gate: component={ex.Component} installed={ex.Installed} " +
                     $"locked={ex.Locked} floor={ex.Floor}", logPath);
             }
@@ -158,9 +165,16 @@ public sealed class BuildOperation(
             if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
                 proc.Kill();
 
-            // 10. Atomic image rename, then attest to the final exact bytes.
-            if (File.Exists(FinalPath)) File.Delete(FinalPath);
-            File.Move(StagingPath, FinalPath);
+            if (File.Exists(FinalPath))
+            {
+                var backupPath = FinalPath + ".bak";
+                File.Replace(StagingPath, FinalPath, backupPath, ignoreMetadataErrors: true);
+                if (File.Exists(backupPath)) File.Delete(backupPath);
+            }
+            else
+            {
+                File.Move(StagingPath, FinalPath);
+            }
 
             var accepted = new SystemImageManifest
             {
@@ -172,25 +186,24 @@ public sealed class BuildOperation(
                 JsonSerializer.Serialize(accepted,
                     ApplianceStateJsonContext.Default.SystemImageManifest));
 
-            RecordAcceptedBuild(stateStore, FinalPath);
+            RecordAcceptedBuild(stateStore, FinalPath, preserveData);
 
             Report("done",
                 $"system.qcow2 built. Python={versions.Python} " +
                 $"Node={versions.Node} MariaDB={versions.MariaDb} Redis={versions.Redis}", 100);
-            return new OperationResult(operationId, OperationKind.Build,
+            return new OperationResult(operationId, opKind,
                 OperationOutcome.Success,
                 "Build complete — system.qcow2 accepted.", logPath);
         }
         catch (OperationCanceledException)
         {
             RemoveStaging();
-            return new OperationResult(operationId, OperationKind.Build,
+            return new OperationResult(operationId, opKind,
                 OperationOutcome.Cancelled, "Build cancelled.", logPath);
         }
         catch (Exception ex)
         {
-            RemoveStaging();
-            return Fail(operationId, $"Build failed: {ex.Message}", logPath);
+            return Fail(operationId, opKind, $"Build failed: {ex.Message}", logPath);
         }
     }
 
@@ -198,13 +211,20 @@ public sealed class BuildOperation(
     /// Publishes the durable lifecycle transition only after the final image and
     /// its acceptance manifest have both been written (F1 → F2).
     /// </summary>
-    public static void RecordAcceptedBuild(StateStore stateStore, string systemImagePath) =>
+    public static void RecordAcceptedBuild(StateStore stateStore, string systemImagePath, bool preserveData = false) =>
         stateStore.Mutate(s =>
         {
-            s.Readiness = ReadinessState.Built;
+            bool hasCommittedData = File.Exists(Path.Combine(KnownPaths.ApplianceDir, "data.img")) ||
+                                   File.Exists(Path.Combine(KnownPaths.ApplianceDir, ".data-committed")) ||
+                                   !string.IsNullOrEmpty(s.DataImagePath);
+
+            s.Readiness = hasCommittedData ? ReadinessState.Initialized : ReadinessState.Built;
             s.Health = HealthState.Stopped;
             s.SystemImagePath = systemImagePath;
-            s.DataImagePath = null;
+            if (!hasCommittedData)
+            {
+                s.DataImagePath = null;
+            }
             s.QemuPid = null;
             s.QemuStartTimeTicks = null;
             s.QmpPort = null;
@@ -263,6 +283,6 @@ public sealed class BuildOperation(
         if (File.Exists(StagingPath)) File.Delete(StagingPath);
     }
 
-    private static OperationResult Fail(Guid id, string msg, string log) =>
-        new(id, OperationKind.Build, OperationOutcome.Failure, msg, log);
+    private static OperationResult Fail(Guid id, OperationKind kind, string msg, string log) =>
+        new(id, kind, OperationOutcome.Failure, msg, log);
 }

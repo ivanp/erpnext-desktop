@@ -24,6 +24,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
     private readonly StartOperation _startOp;
     private readonly StopOperation _stopOp;
     private readonly RecoverOperation _recoverOp;
+    private readonly InspectArchiveOperation _inspectArchiveOp;
+    private readonly AdoptOperation _adoptOp;
 
     public ApplianceService(
         ManagedRuntimeResolver runtimeResolver,
@@ -51,6 +53,11 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _recoverOp = new RecoverOperation(
             imageTool, runtimeResolver, certStore,
             healthCredentials, stateStore, manifest, settings);
+        _inspectArchiveOp = new InspectArchiveOperation(manifest);
+        _adoptOp   = new AdoptOperation(
+            imageTool, runtimeResolver, certStore,
+            healthCredentials, stateStore, manifest, settings);
+        AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
     }
 
     // ── Status (non-mutating, no lock) ────────────────────────────────────────
@@ -68,6 +75,19 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             if (!CanBuildFrom(_stateStore.Read(), HasCommittedDataOnDisk()))
                 return InvalidReadiness(OperationKind.Build, "not built or site-less built without persistent data", "Use Recover to replace an initialized system image.");
             return await _buildOp.ExecuteAsync(Guid.NewGuid(), progress, ct);
+        }
+    }
+
+    public async Task<OperationResult> BuildPreservingDataAsync(
+        IProgress<OperationUpdate> progress, CancellationToken ct = default)
+    {
+        var lease = _lock.TryAcquire(TimeSpan.Zero);
+        if (lease is null) return Busy(OperationKind.BuildPreservingData);
+        using (lease)
+        {
+            if (!CanBuildPreservingDataFrom(_stateStore.Read(), HasCommittedDataOnDisk()))
+                return InvalidReadiness(OperationKind.BuildPreservingData, "data disk present", "Use Build to create a fresh system image when no data disk exists.");
+            return await _buildOp.ExecuteAsync(Guid.NewGuid(), progress, preserveData: true, ct);
         }
     }
 
@@ -137,6 +157,25 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             return await _recoverOp.ExecuteAsync(Guid.NewGuid(), replacementImagePath, progress, ct);
     }
 
+    public Task<ArchiveInspection> InspectArchiveAsync(
+        string archivePath, CancellationToken ct = default)
+    {
+        return _inspectArchiveOp.ExecuteAsync(archivePath, ct);
+    }
+
+    public async Task<OperationResult> AdoptAsync(
+        AdoptParameters parameters,
+        ArchiveInspection inspection,
+        bool legacyConsentApproved,
+        IProgress<OperationUpdate> progress, CancellationToken ct = default)
+    {
+        var lease = _lock.TryAcquire(TimeSpan.Zero);
+        if (lease is null) return Busy(OperationKind.Adopt);
+        using (lease)
+            return await _adoptOp.ExecuteAsync(
+                Guid.NewGuid(), parameters, inspection, legacyConsentApproved, progress, ct);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -155,6 +194,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
     private static OperationResult Busy(OperationKind kind) =>
         new(Guid.NewGuid(), kind, OperationOutcome.Failure,
             "Another operation is already in progress. Wait for it to complete.");
+    public static bool CanBuildPreservingDataFrom(ApplianceState state, bool committedDataExists) =>
+        committedDataExists || !string.IsNullOrEmpty(state.DataImagePath);
 
     private OperationResult InvalidReadiness(OperationKind kind, string required, string remediation) =>
         new(Guid.NewGuid(), kind, OperationOutcome.Failure,

@@ -54,12 +54,17 @@ public sealed class StartOperation(
                 OperationOutcome.Success,
                 $"Appliance already running at {state.LoopbackUrl}", logPath);
         }
-
         // Guard: recovery journal blocks start.
         if (state.RecoveryJournal is { HealthPassed: false })
             return Fail(operationId,
                 "A recovery operation was interrupted before the health gate. " +
                 "Run Recover to complete migration before starting.", logPath);
+
+        // Guard: adoption journal blocks start (KTD9).
+        if (state.AdoptionJournal is not null)
+            return Fail(operationId,
+                "A dataset adoption operation was interrupted before completion. " +
+                "Run Load Existing to complete adoption before starting.", logPath);
 
         // Guard: readiness.
         if (state.Readiness != ReadinessState.Initialized)

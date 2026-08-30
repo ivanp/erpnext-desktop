@@ -28,8 +28,7 @@ public sealed class AppShellHeadlessTests
         var text = dashboard.GetVisualDescendants().OfType<TextBlock>()
             .Select(block => block.Text).ToArray();
         var progress = Assert.Single(dashboard.GetVisualDescendants().OfType<ProgressBar>());
-
-        Assert.Contains("Running", text);
+        Assert.Contains(vm.StatusBadgeText, text);
         Assert.Contains("Checking ERPNext health", text);
         Assert.Equal(75, progress.Value);
 

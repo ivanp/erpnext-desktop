@@ -19,8 +19,9 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 156 | Pass — 2026-08-23 |
-| `Serpy.App.Tests` | 47 | Pass — 2026-08-23 |
+| `Serpy.Core.Tests` | 226 | Pass — 2026-08-28 |
+| `Serpy.App.Tests` | 48 | Pass — 2026-08-28 |
+| `Serpy.InstallerBootstrapper.Tests` | 11 | Pass — 2026-08-28 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment pending: set `SERPY_ADMIN_PASSWORD` and `SERPY_RUN_APPLIANCE=1`; the configured per-user QEMU installer is checksum-pinned but has not yet been clean-installed through the acceptance workflow. |

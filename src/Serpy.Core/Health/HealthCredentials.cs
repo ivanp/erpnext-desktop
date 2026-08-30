@@ -20,6 +20,7 @@ namespace Serpy.Core.Health;
 public sealed class HealthCredentials
 {
     private readonly string _storePath;
+    public string StorePath => _storePath;
 
     public HealthCredentials(string? storePath = null)
     {

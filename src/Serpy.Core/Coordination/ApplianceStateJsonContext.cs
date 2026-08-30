@@ -13,6 +13,8 @@ namespace Serpy.Core.Coordination;
 [JsonSerializable(typeof(RecoveryJournal))]
 [JsonSerializable(typeof(SystemImageManifest))]
 [JsonSerializable(typeof(GuestVersionReport))]
+[JsonSerializable(typeof(ProvenanceRecord))]
+[JsonSerializable(typeof(AdoptionJournal))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     UseStringEnumConverter = true,

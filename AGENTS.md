@@ -61,6 +61,7 @@ dotnet test Serpy.slnx -c Release --filter "FullyQualifiedName!~IntegrationTests
 
 - Follow the plan's requirement IDs (R1–R17), key decisions (KD1–KD7), and implementation units (U1–U7) when touching behavior.
 - Update `docs/results.md` when verification outcomes change.
+- `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`).
 - Guest helper scripts live in `guest/` (`init-data.sh`, `recover.sh`, `provision-done.sh`); cloud-init seeds in `build/cloud-init/`.
 - CI: `build-test-publish.yml` (build/test + Windows Native-AOT publish), `qemu-windows.yml` (self-hosted WHPX runner, QEMU bundle build + mTLS smoke).
 

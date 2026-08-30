@@ -102,6 +102,23 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
+    public async Task StartCommand_WhenHealthy_AutomaticallyTriggersOpenUrlRequested()
+    {
+        var service = new FakeApplianceService
+        {
+            Status = new ApplianceStatus(ReadinessState.Initialized, HealthState.Running, "http://127.0.0.1:18080", null, null, null),
+        };
+        var vm = MakeVm();
+        string? openedUrl = null;
+        vm.OpenUrlRequested += (_, url) => openedUrl = url;
+        vm.SetService(service);
+        vm.Status = new ApplianceStatus(ReadinessState.Initialized, HealthState.Stopped, null, null, null, null);
+
+        await vm.StartCommand.ExecuteAsync(null);
+
+        Assert.Equal("http://127.0.0.1:18080", openedUrl);
+    }
+    [Fact]
     public void SetAutostartCommand_RaisesRequestedState()
     {
         var vm = MakeVm();
@@ -231,15 +248,18 @@ public sealed class DashboardViewModelTests
     // ── PrimaryActionLabel ───────────────────────────────────────────────
 
     [Theory]
-    [InlineData(ReadinessState.NotBuilt, HealthState.Stopped, "Build appliance")]
-    [InlineData(ReadinessState.Built, HealthState.Stopped, "Initialize")]
-    [InlineData(ReadinessState.Initialized, HealthState.Stopped, "Start")]
-    [InlineData(ReadinessState.Initialized, HealthState.Crashed, "Restart (clear crash)")]
+    [InlineData(ReadinessState.NotBuilt, HealthState.Stopped, LaunchRoute.Setup, false, "Set Up ERPNext")]
+    [InlineData(ReadinessState.NotBuilt, HealthState.Stopped, LaunchRoute.Setup, true, "Build & Initialize")]
+    [InlineData(ReadinessState.Initialized, HealthState.Stopped, LaunchRoute.Start, false, "Start ERPNext")]
+    [InlineData(ReadinessState.Initialized, HealthState.Stopped, LaunchRoute.Start, true, "Start QEMU VM")]
+    [InlineData(ReadinessState.Initialized, HealthState.Crashed, LaunchRoute.Start, false, "Restart ERPNext")]
+    [InlineData(ReadinessState.Initialized, HealthState.Crashed, LaunchRoute.Start, true, "Restart (clear crash)")]
     public void PrimaryActionLabel_MapsReadinessPlusHealth(
-        ReadinessState r, HealthState h, string expected)
+        ReadinessState r, HealthState h, LaunchRoute route, bool showDetails, string expected)
     {
         var vm = MakeVm();
-        vm.Status = Status(r, h);
+        vm.ShowDetails = showDetails;
+        vm.Status = new ApplianceStatus(r, h, null, null, null, null, RecommendedRoute: route);
         Assert.Equal(expected, vm.PrimaryActionLabel);
     }
 
@@ -253,13 +273,12 @@ public sealed class DashboardViewModelTests
     }
 
     [Theory]
-    [InlineData(ReadinessState.NotBuilt, HealthState.Stopped, OperationKind.Build)]
     [InlineData(ReadinessState.Initialized, HealthState.Stopped, OperationKind.Start)]
     [InlineData(ReadinessState.Initialized, HealthState.Crashed, OperationKind.Restart)]
     public async Task PrimaryAction_DispatchesOperationForCurrentState(
         ReadinessState readiness, HealthState health, OperationKind expected)
     {
-        var service = new FakeApplianceService { Status = Status(readiness, health) };
+        var service = new FakeApplianceService { Status = new ApplianceStatus(readiness, health, null, null, null, null, RecommendedRoute: LaunchRoute.Start) };
         var vm = MakeVm();
         vm.SetService(service);
         vm.Status = service.Status;

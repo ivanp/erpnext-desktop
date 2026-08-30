@@ -41,19 +41,34 @@ public sealed class StatusOperation(StateStore stateStore)
             }
         }
 
-        // Recovery journal blocks start.
+        // Journal guards surface active operations even if process dies mid-operation
         OperationKind? activeOp = state.ActiveOperation;
         if (state.RecoveryJournal is { HealthPassed: false })
-            activeOp = OperationKind.Recover; // surface as active even if no op is running
+            activeOp = OperationKind.Recover;
+        else if (state.AdoptionJournal is not null)
+            activeOp = OperationKind.Adopt;
+
+        string committedDataPath = Path.Combine(KnownPaths.ApplianceDir, "data.img");
+        string markerPath = Path.Combine(KnownPaths.ApplianceDir, ".data-committed");
+        bool hasCommittedData = File.Exists(committedDataPath) || File.Exists(markerPath) || !string.IsNullOrEmpty(state.DataImagePath);
+
+        bool archiveHasProvenance = File.Exists(committedDataPath) &&
+            File.Exists(Images.ProvenanceRecordStore.GetProvenancePath(committedDataPath));
+
+        LaunchRoute route = (state.Readiness == ReadinessState.Initialized)
+            ? LaunchRoute.Start
+            : LaunchRoute.Setup;
 
         var status = new ApplianceStatus(
-            Readiness:       state.Readiness,
-            Health:          health,
-            LoopbackUrl:     health == HealthState.Running ? state.LoopbackUrl : null,
-            CurrentStage:    null,
-            ActiveOperation: activeOp,
-            ProgressPercent: null);
-
+            Readiness:                   state.Readiness,
+            Health:                      health,
+            LoopbackUrl:                 health == HealthState.Running ? state.LoopbackUrl : null,
+            CurrentStage:                null,
+            ActiveOperation:             activeOp,
+            ProgressPercent:             null,
+            HasCommittedDataOnDisk:      hasCommittedData,
+            ArchiveHasProvenanceRecord:  archiveHasProvenance,
+            RecommendedRoute:            route);
         return Task.FromResult(status);
     }
 }
