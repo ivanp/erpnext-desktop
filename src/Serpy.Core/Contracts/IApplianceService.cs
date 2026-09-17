@@ -86,6 +86,12 @@ public interface IApplianceService
         bool legacyConsentApproved,
         IProgress<OperationUpdate> progress,
         CancellationToken ct = default);
+    /// <summary>
+    /// Stop running VM if any, wipe appliance disks, state, and credentials while preserving runtime binaries and base image.
+    /// </summary>
+    Task<OperationResult> ResetAsync(
+        IProgress<OperationUpdate> progress,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Non-mutating status read. Never acquires the lifecycle lease.

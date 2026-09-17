@@ -26,6 +26,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
     private readonly RecoverOperation _recoverOp;
     private readonly InspectArchiveOperation _inspectArchiveOp;
     private readonly AdoptOperation _adoptOp;
+    private readonly ResetOperation _resetOp;
 
     public ApplianceService(
         ManagedRuntimeResolver runtimeResolver,
@@ -57,6 +58,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _adoptOp   = new AdoptOperation(
             imageTool, runtimeResolver, certStore,
             healthCredentials, stateStore, manifest, settings);
+        _resetOp   = new ResetOperation(
+            _stopOp, healthCredentials, stateStore, new SetupStateStore());
         AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
     }
 
@@ -174,6 +177,14 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         using (lease)
             return await _adoptOp.ExecuteAsync(
                 Guid.NewGuid(), parameters, inspection, legacyConsentApproved, progress, ct);
+    }
+    public async Task<OperationResult> ResetAsync(
+        IProgress<OperationUpdate> progress, CancellationToken ct = default)
+    {
+        var lease = _lock.TryAcquire(TimeSpan.Zero);
+        if (lease is null) return Busy(OperationKind.Reset);
+        using (lease)
+            return await _resetOp.ExecuteAsync(Guid.NewGuid(), progress, ct);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

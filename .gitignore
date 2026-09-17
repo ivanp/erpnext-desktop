@@ -19,6 +19,7 @@ data/
 publish/
 dist/
 __ce-goal-prompt*
+.worktrees/
 
 # Local dev-only signing material (self-signed test certs, private keys) — never committed
 .local-signing/

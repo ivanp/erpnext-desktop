@@ -58,4 +58,5 @@ public enum OperationKind
     BuildPreservingData,
     InspectArchive,
     Adopt,
+    Reset,
 }

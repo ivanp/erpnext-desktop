@@ -60,6 +60,11 @@ public sealed class FakeApplianceService : IApplianceService
         CalledOperations.Add(OperationKind.Adopt);
         return Task.FromResult(Ok(OperationKind.Adopt));
     }
+    public Task<OperationResult> ResetAsync(IProgress<OperationUpdate> p, CancellationToken ct = default)
+    {
+        CalledOperations.Add(OperationKind.Reset);
+        return Task.FromResult(Ok(OperationKind.Reset));
+    }
 
     public Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default)
         => Task.FromResult(Status);
