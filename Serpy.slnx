@@ -9,5 +9,6 @@
     <Project Path="tests/Serpy.Core.Tests/Serpy.Core.Tests.csproj" />
     <Project Path="tests/Serpy.InstallerBootstrapper.Tests/Serpy.InstallerBootstrapper.Tests.csproj" />
     <Project Path="tests/Serpy.Windows.IntegrationTests/Serpy.Windows.IntegrationTests.csproj" />
+    <Project Path="tests/Serpy.Windows.UiTests/Serpy.Windows.UiTests.csproj" />
   </Folder>
 </Solution>

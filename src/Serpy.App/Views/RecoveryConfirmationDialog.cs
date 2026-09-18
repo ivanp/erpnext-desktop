@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 
@@ -32,6 +33,8 @@ public sealed class RecoveryConfirmationDialog : Window
 
         recover.Click += (_, _) => Close(true);
         cancel.Click += (_, _) => Close(false);
+        AutomationProperties.SetAutomationId(recover, "ConfirmRecoverButton");
+        AutomationProperties.SetAutomationId(cancel, "CancelRecoverButton");
 
         Content = new StackPanel
         {

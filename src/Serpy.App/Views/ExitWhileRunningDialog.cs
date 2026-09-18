@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 
@@ -21,6 +22,9 @@ public sealed class ExitWhileRunningDialog : Window
         stop.Click += (_, _) => Close(ExitWhileRunningChoice.Stop);
         leave.Click += (_, _) => Close(ExitWhileRunningChoice.LeaveRunning);
         cancel.Click += (_, _) => Close(ExitWhileRunningChoice.Cancel);
+        AutomationProperties.SetAutomationId(stop, "StopApplianceButton");
+        AutomationProperties.SetAutomationId(leave, "LeaveRunningButton");
+        AutomationProperties.SetAutomationId(cancel, "CancelButton");
 
         Content = new StackPanel
         {

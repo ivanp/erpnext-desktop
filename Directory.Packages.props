@@ -11,5 +11,7 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.0.1" />
     <PackageVersion Include="DiscUtils.Iso9660" Version="0.16.13" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="9.0.7" />
+    <PackageVersion Include="FlaUI.Core" Version="4.0.0" />
+    <PackageVersion Include="FlaUI.UIA3" Version="4.0.0" />
   </ItemGroup>
 </Project>

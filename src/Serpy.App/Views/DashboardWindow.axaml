@@ -14,10 +14,11 @@
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,14">
       <TextBlock Text="Serpy" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
       <Border Background="#EEF1F4" CornerRadius="12" Padding="10,5">
-        <TextBlock Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
+        <TextBlock AutomationProperties.AutomationId="StatusBadge" Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
       </Border>
       <!-- Loopback URL when healthy -->
-      <TextBlock Text="{Binding Status.LoopbackUrl}"
+      <TextBlock AutomationProperties.AutomationId="LoopbackUrlText"
+                 Text="{Binding Status.LoopbackUrl}"
                  FontSize="12" Foreground="#2563EB"
                  VerticalAlignment="Center"
                  IsVisible="{Binding IsHealthy}"/>
@@ -25,54 +26,63 @@
 
     <!-- Stage text + progress -->
     <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,14">
-      <TextBlock Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
-      <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
+      <TextBlock AutomationProperties.AutomationId="StageText" Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
+      <ProgressBar AutomationProperties.AutomationId="ProgressBar" Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
     </StackPanel>
 
     <!-- Primary action row -->
     <!-- Primary action follows readiness/health, not a fixed Start command. -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-      <Button Content="{Binding PrimaryActionLabel}"
+      <Button AutomationProperties.AutomationId="PrimaryActionButton"
+              Content="{Binding PrimaryActionLabel}"
               Command="{Binding PrimaryActionCommand}"
               IsEnabled="{Binding CanExecutePrimaryAction}"
               Classes="accent"/>
 
       <!-- Build (NotBuilt only) -->
-      <Button Content="Build…"
+      <Button AutomationProperties.AutomationId="BuildButton"
+              Content="Build…"
               Command="{Binding BuildCommand}"
               IsVisible="{Binding !CanStart}"/>
 
       <!-- Initialize (Built only) -->
-      <Button Content="Initialize…"
+      <Button AutomationProperties.AutomationId="InitializeButton"
+              Content="Initialize…"
               Command="{Binding InitializeCommand}"/>
 
       <!-- Stop -->
-      <Button Content="Stop"
+      <Button AutomationProperties.AutomationId="StopButton"
+              Content="Stop"
               Command="{Binding StopCommand}"
               IsEnabled="{Binding CanStop}"/>
 
       <!-- Restart -->
-      <Button Content="Restart"
+      <Button AutomationProperties.AutomationId="RestartButton"
+              Content="Restart"
               Command="{Binding RestartCommand}"
               IsEnabled="{Binding CanRestart}"/>
 
-      <Button Content="Recover…"
+      <Button AutomationProperties.AutomationId="RecoverButton"
+              Content="Recover…"
               Command="{Binding RecoverCommand}"
               IsEnabled="{Binding CanRecover}"/>
 
       <!-- Open ERPNext (healthy only) -->
-      <Button Content="Open ERPNext ↗"
+      <Button AutomationProperties.AutomationId="OpenErpNextButton"
+              Content="Open ERPNext ↗"
               Command="{Binding OpenErpNextCommand}"
               IsEnabled="{Binding IsHealthy}"/>
 
       <!-- Cancel in-flight operation -->
-      <Button Content="✕"
+      <Button AutomationProperties.AutomationId="CancelButton"
+              Content="✕"
               Command="{Binding CancelCommand}"
               IsEnabled="{Binding IsOperationRunning}"
               ToolTip.Tip="Cancel current operation"/>
     </StackPanel>
 
-    <CheckBox DockPanel.Dock="Top"
+    <CheckBox AutomationProperties.AutomationId="StartAtSignInCheckbox"
+              DockPanel.Dock="Top"
               Margin="0,8,0,0"
               Content="Start Serpy at sign-in"
               IsChecked="{Binding StartAtSignIn}"
@@ -80,12 +90,14 @@
               CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}" />
 
     <!-- Show-details disclosure (off by default, R17) -->
-    <Expander DockPanel.Dock="Bottom"
+    <Expander AutomationProperties.AutomationId="DetailsExpander"
+              DockPanel.Dock="Bottom"
               Header="Show details"
               IsExpanded="{Binding ShowDetails}"
               Margin="0,8,0,0">
       <ScrollViewer MaxHeight="160">
-        <TextBlock Text="{Binding DetailLog}"
+        <TextBlock AutomationProperties.AutomationId="DetailLogText"
+                   Text="{Binding DetailLog}"
                    FontFamily="Cascadia Code,Consolas,monospace"
                    FontSize="11"
                    TextWrapping="Wrap"

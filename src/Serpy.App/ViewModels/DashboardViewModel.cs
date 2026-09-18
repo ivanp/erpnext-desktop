@@ -129,6 +129,28 @@ public sealed partial class DashboardViewModel : ObservableObject
         if (s.CurrentStage is { } stage) StageText = stage;
         if (s.ProgressPercent.HasValue) ProgressPercent = s.ProgressPercent.Value;
     }
+    partial void OnStatusChanged(ApplianceStatus value)
+    {
+        PrimaryActionCommand.NotifyCanExecuteChanged();
+        BuildCommand.NotifyCanExecuteChanged();
+        InitializeCommand.NotifyCanExecuteChanged();
+        StopCommand.NotifyCanExecuteChanged();
+        RestartCommand.NotifyCanExecuteChanged();
+        RecoverCommand.NotifyCanExecuteChanged();
+        OpenErpNextCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsOperationRunningChanged(bool value)
+    {
+        PrimaryActionCommand.NotifyCanExecuteChanged();
+        BuildCommand.NotifyCanExecuteChanged();
+        InitializeCommand.NotifyCanExecuteChanged();
+        StopCommand.NotifyCanExecuteChanged();
+        RestartCommand.NotifyCanExecuteChanged();
+        RecoverCommand.NotifyCanExecuteChanged();
+        OpenErpNextCommand.NotifyCanExecuteChanged();
+        CancelCommand.NotifyCanExecuteChanged();
+    }
 
     // ── Shell commands (no service call) ─────────────────────────────────
 

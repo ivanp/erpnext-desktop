@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -73,6 +74,16 @@ public sealed class InitializeDialog : Window
             Margin = new Thickness(0, 0, 8, 0),
         };
 
+        AutomationProperties.SetAutomationId(_createNewRadio, "CreateNewRadio");
+        AutomationProperties.SetAutomationId(_loadExistingRadio, "LoadExistingRadio");
+        AutomationProperties.SetAutomationId(_siteNameBox, "SiteNameBox");
+        AutomationProperties.SetAutomationId(_archivePathBox, "ArchivePathBox");
+        AutomationProperties.SetAutomationId(_browseButton, "BrowseArchiveButton");
+        AutomationProperties.SetAutomationId(_passwordBox, "PasswordBox");
+        AutomationProperties.SetAutomationId(_confirmPasswordBox, "ConfirmPasswordBox");
+        AutomationProperties.SetAutomationId(_validationText, "ValidationMessageText");
+        AutomationProperties.SetAutomationId(okBtn, "ContinueButton");
+        AutomationProperties.SetAutomationId(cancelBtn, "CancelButton");
         _createNewPanel = new StackPanel
         {
             Spacing = 4,

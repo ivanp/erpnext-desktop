@@ -78,6 +78,9 @@ public sealed class App : Application
                     .ContinueWith(_ => HandlePostStatusUpdate(),
                         TaskScheduler.FromCurrentSynchronizationContext());
             };
+            _ = _dashboardVm.RefreshStatusAsync()
+                .ContinueWith(_ => HandlePostStatusUpdate(),
+                    TaskScheduler.FromCurrentSynchronizationContext());
             timer.Start();
             _pollTimer = timer;
 

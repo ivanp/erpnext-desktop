@@ -14,7 +14,7 @@ public static class KnownPaths
     /// macOS:   ~/Library/Application Support/Serpy
     /// Linux:   $XDG_DATA_HOME/Serpy  (fallback: ~/.local/share/Serpy)
     /// </summary>
-    public static string AppDataRoot { get; } = ResolveAppDataRoot();
+    public static string AppDataRoot => ResolveAppDataRoot();
 
     /// <summary>Appliance workspace: system.qcow2, data.img, recovery journal.</summary>
     public static string ApplianceDir => Path.Combine(AppDataRoot, "appliance");
@@ -30,6 +30,9 @@ public static class KnownPaths
 
     private static string ResolveAppDataRoot()
     {
+        var testOverride = Environment.GetEnvironmentVariable("SERPY_TEST_APPDATA");
+        if (!string.IsNullOrWhiteSpace(testOverride))
+            return Path.GetFullPath(testOverride);
         if (OperatingSystem.IsWindows())
         {
             var localAppData = Environment.GetFolderPath(
