@@ -208,6 +208,16 @@ jobs:
           dotnet test tests/Serpy.Windows.IntegrationTests/Serpy.Windows.IntegrationTests.csproj `
             -c Release --logger "console;verbosity=normal" --no-build
 
+
+      # ── UI Acceptance Tests (FlaUI) ──────────────────────────────────────────
+      - name: Publish Serpy.App for UI tests
+        run: |
+          dotnet publish src/Serpy.App/Serpy.App.csproj -c Release -r win-x64 --no-self-contained
+
+      - name: Run Windows UI Automation tests (FlaUI)
+        run: |
+          dotnet test tests/Serpy.Windows.UiTests/Serpy.Windows.UiTests.csproj `
+            -c Release --filter "Category!=LiveE2E" --logger "console;verbosity=normal"
       - name: Upload QEMU bundle artifact
         uses: actions/upload-artifact@v4
         with:

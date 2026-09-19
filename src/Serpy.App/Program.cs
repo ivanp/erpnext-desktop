@@ -19,7 +19,7 @@ if (isUnattended)
     ConsoleAttachment.TryAttachParent();
 }
 
-string singleInstanceMutexName = $"Local\\Serpy-App-{Environment.UserName}";
+string singleInstanceMutexName = ResolveSingleInstanceMutexName();
 Mutex singleInstanceMutex;
 try
 {
@@ -243,4 +243,11 @@ static string FindCloudInitDir()
     }
     // Fallback: copy cloud-init to the app output directory during packaging.
     return Path.Combine(AppContext.BaseDirectory, "cloud-init");
+}
+static string ResolveSingleInstanceMutexName()
+{
+    var appData = KnownPaths.AppDataRoot;
+    using var sha = System.Security.Cryptography.SHA256.Create();
+    var hash = Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(appData)));
+    return $"Local\\Serpy-App-{Environment.UserName}-{hash[..8]}";
 }

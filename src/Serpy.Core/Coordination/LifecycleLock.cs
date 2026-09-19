@@ -9,8 +9,15 @@ public sealed class LifecycleLock : IDisposable
 {
     // Per-user scope: the SID is baked into the name so two Windows user sessions
     // each get their own mutex and never block each other.
-    private static readonly string s_mutexName =
-        $@"Local\Serpy-lifecycle-{Environment.UserName}";
+    private static readonly string s_mutexName = ResolveMutexName();
+
+    private static string ResolveMutexName()
+    {
+        var appData = Configuration.KnownPaths.AppDataRoot;
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(appData)));
+        return $@"Local\Serpy-lifecycle-{Environment.UserName}-{hash[..8]}";
+    }
 
     private readonly Mutex _mutex = new(false, s_mutexName);
     private bool _held;

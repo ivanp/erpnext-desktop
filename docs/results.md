@@ -102,6 +102,18 @@ Before it downloads the Debian base image or starts QEMU, `BuildOperation` resol
 | GUI/tray/autostart/exit AE7+AE8 | ✅ Satisfied — 47 Avalonia.Headless tests pass |
 | README + results.md correct and honest | ✅ Satisfied — this file |
 
+---
+
+## Unattended Clean Installation & Windows Desktop GUI E2E Automation — 2026-09-18
+
+| Deliverable | Status | Verification Evidence |
+|---|---|---|
+| Unattended Clean Install (`--unattended` / `--fresh-install`) | ✅ Satisfied | Automated reset pipeline stops running VMs, cleans instance disks, preserves downloaded runtime & base Debian image cache, provisions with default credentials (`Administrator` / `admin`), and opens browser |
+| Windows Console Attachment | ✅ Satisfied | Native-AOT compatible `AttachConsole(-1)` routes stdout/stderr directly to calling terminal |
+| Mutex Takeover & Process Guard | ✅ Satisfied | Sandboxed `SERPY_TEST_APPDATA` mutex scoping prevents test/production collision; graceful/kill takeover handles prior instances |
+| FlaUI Windows Desktop UI Tests (`Serpy.Windows.UiTests`) | ✅ Satisfied | Real OS desktop UI automation testing DashboardWindow, InitializeDialog input validation, Exit dialog, and lifecycle state transitions |
+| Diagnostic Failure Artifacts (`DiagnosticCapture`) | ✅ Satisfied | Automatically captures desktop + window PNG screenshots, UIA visual tree dump (`uitree.txt`), and application logs on any test failure |
+
 
 ## Guest version report
 
