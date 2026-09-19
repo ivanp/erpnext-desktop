@@ -6,6 +6,7 @@ using Serpy.Core.Operations;
 /// ApplianceService contract tests using a stub store — no QEMU.
 /// Focuses on: lifecycle lock busy-detection, status non-mutating, state round-trip.
 /// </summary>
+[Collection("LifecycleLock")]
 public sealed class ApplianceServiceContractTests : IDisposable
 {
     private readonly string _dir =
@@ -179,6 +180,7 @@ public sealed class ApplianceServiceContractTests : IDisposable
     }
 }
 
+[Collection("LifecycleLock")]
 public sealed class ApplianceServicePreconditionTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyServicePrecondition-{Guid.NewGuid():N}");

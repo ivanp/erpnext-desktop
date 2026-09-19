@@ -2,6 +2,7 @@ using Serpy.Core.Coordination;
 
 namespace Serpy.Core.Tests.Coordination;
 
+[Collection("LifecycleLock")]
 public sealed class LifecycleLockTests
 {
     // Windows Mutex is thread-affined: acquire and release MUST happen on the same thread.

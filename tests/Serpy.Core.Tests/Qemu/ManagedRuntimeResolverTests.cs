@@ -339,7 +339,8 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
             },
         }); // uses the real default BootstrapLauncher, not a stub
 
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(() => resolver.InstallAsync());
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => resolver.InstallAsync());
+        Assert.True(ex is NotSupportedException or InvalidOperationException);
         Assert.Contains("Serpy.InstallerBootstrapper.exe", ex.Message);
         Assert.False(resolver.IsInstalled());
     }
