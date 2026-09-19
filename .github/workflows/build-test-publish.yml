@@ -27,7 +27,7 @@ jobs:
       - name: Unit tests (Core + App headless)
         run: |
           dotnet test Serpy.slnx --no-build -c Release `
-            --filter "FullyQualifiedName!~IntegrationTests" `
+            --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~UiTests" `
             --logger "console;verbosity=normal"
 
   publish-windows:
