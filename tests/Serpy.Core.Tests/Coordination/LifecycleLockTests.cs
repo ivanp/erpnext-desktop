@@ -1,93 +1,141 @@
+using System.Diagnostics;
+using Serpy.Core.Configuration;
 using Serpy.Core.Coordination;
 
 namespace Serpy.Core.Tests.Coordination;
 
+// Sets the process-wide app-data override, so it must not run beside other tests that do.
 [Collection("LifecycleLock")]
-public sealed class LifecycleLockTests
+public sealed class LifecycleLockTests : IDisposable
 {
-    // Windows Mutex is thread-affined: acquire and release MUST happen on the same thread.
-    // Windows named mutexes are also reentrant per-thread (same thread can re-acquire).
-    // Production contention is cross-process; test simulates it with explicit Thread objects.
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previous = Environment.GetEnvironmentVariable(OverrideVariable);
+    private readonly List<string> _dirs = [];
+
+    public LifecycleLockTests() => UseNewAppDataRoot();
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previous);
+        foreach (var dir in _dirs)
+            if (Directory.Exists(dir)) try { Directory.Delete(dir, recursive: true); } catch { }
+    }
+
+    private string UseNewAppDataRoot()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"SerpyLock-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        _dirs.Add(dir);
+        Environment.SetEnvironmentVariable(OverrideVariable, dir);
+        return dir;
+    }
 
     [Fact]
-    public void SecondAcquireWhileHeld_OnDifferentThread_ReturnsNull()
+    public async Task ALeaseTakenOnOneThread_IsReleasedOnAnotherWithoutAnError()
     {
-        using var lock1 = new LifecycleLock();
+        using var lk = new LifecycleLock();
+        var lease = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(lease);
 
-        // Acquire on current thread.
-        var lease1 = lock1.TryAcquire(TimeSpan.Zero);
-        Assert.NotNull(lease1);
+        // An operation that awaits resumes on a pool thread and disposes its lease there.
+        await Task.Run(() => lease.Dispose());
 
-        // Background thread tries to acquire while lease1 is held.
-        LifecycleLock.LeaseHandle? lease2 = null;
-        var t = new Thread(() =>
+        using var again = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(again);
+    }
+
+    [Fact]
+    public async Task AnOperationThatMovesThreadsMidway_StillFreesTheLease()
+    {
+        using var lk = new LifecycleLock();
+
+        await Task.Run(async () =>
         {
-            using var lock2 = new LifecycleLock();
-            lease2 = lock2.TryAcquire(TimeSpan.Zero);
-            // lease2 should be null; if somehow non-null, dispose it here on the correct thread.
-            lease2?.Dispose();
-            lease2 = null; // ensure outer assertion sees null
+            using var lease = lk.TryAcquire(TimeSpan.Zero);
+            Assert.NotNull(lease);
+            await Task.Delay(20);
+            await Task.Yield();
         });
-        t.Start();
-        t.Join();
 
-        // Release on the same (current) thread that acquired.
-        lease1.Dispose();
-
-        Assert.Null(lease2);
+        using var next = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(next);
     }
 
     [Fact]
-    public void AfterRelease_SecondAcquireOnDifferentThread_Succeeds()
+    public void ASecondAcquireWhileTheLeaseIsHeld_ReturnsNothingAfterItsTimeout()
     {
-        using var lock1 = new LifecycleLock();
+        using var first = new LifecycleLock();
+        using var second = new LifecycleLock();
+        using var lease = first.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(lease);
 
-        var lease1 = lock1.TryAcquire(TimeSpan.Zero);
-        Assert.NotNull(lease1);
-        // Release on the current thread before the background thread tries.
-        lease1.Dispose();
+        var clock = Stopwatch.StartNew();
+        var other = second.TryAcquire(TimeSpan.FromMilliseconds(200));
+        clock.Stop();
 
-        LifecycleLock.LeaseHandle? lease2 = null;
-        var t = new Thread(() =>
-        {
-            using var lock2 = new LifecycleLock();
-            lease2 = lock2.TryAcquire(TimeSpan.Zero);
-            lease2?.Dispose(); // release on acquiring thread
-        });
-        t.Start();
-        t.Join();
-
-        // lease2 was set before Dispose inside the thread; value is the result of TryAcquire.
-        // We can't inspect after Dispose, so use a flag.
-        // Restructure: track success via a bool.
+        Assert.Null(other);
+        Assert.InRange(clock.ElapsedMilliseconds, 150, 5_000);
     }
 
     [Fact]
-    public void AfterRelease_SecondAcquireOnDifferentThread_Succeeds_WithFlag()
+    public void AnAcquireWithTime_SucceedsWhenTheHolderReleasesInside_ItsTimeout()
     {
-        using var lock1 = new LifecycleLock();
+        using var first = new LifecycleLock();
+        using var second = new LifecycleLock();
+        var lease = first.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(lease);
+        _ = Task.Run(async () => { await Task.Delay(100); lease.Dispose(); });
 
-        var lease1 = lock1.TryAcquire(TimeSpan.Zero);
-        Assert.NotNull(lease1);
-        lease1.Dispose();
+        using var other = second.TryAcquire(TimeSpan.FromSeconds(10));
 
-        bool acquired = false;
-        var t = new Thread(() =>
-        {
-            using var lock2 = new LifecycleLock();
-            using var l = lock2.TryAcquire(TimeSpan.Zero);
-            acquired = l is not null;
-        }); // Dispose releases on the thread-pool thread — correct, same thread acquired it
-        t.Start();
-        t.Join();
-
-        Assert.True(acquired);
+        Assert.NotNull(other);
     }
 
     [Fact]
-    public void Dispose_WithoutAcquire_DoesNotThrow()
+    public void AnAcquireSucceeds_AfterAHolderThatNeverReleasedLostItsHandle()
     {
-        var lk = new LifecycleLock();
-        lk.Dispose(); // must not throw
+        // A crashed process never calls Release; the OS closes its handle. Holding the file open
+        // with no sharing and then closing the handle leaves the same trace.
+        var lockFile = Path.Combine(KnownPaths.SettingsDir, "lifecycle.lock");
+        Directory.CreateDirectory(KnownPaths.SettingsDir);
+        var crashedHolder = new FileStream(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        using var lk = new LifecycleLock();
+        Assert.Null(lk.TryAcquire(TimeSpan.Zero));
+
+        crashedHolder.Dispose();
+
+        using var lease = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(lease);
+    }
+
+    [Fact]
+    public void TwoAppDataRoots_DoNotContend()
+    {
+        using var inFirstRoot = new LifecycleLock();
+        using var leaseOne = inFirstRoot.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(leaseOne);
+
+        UseNewAppDataRoot();
+        using var inSecondRoot = new LifecycleLock();
+        using var leaseTwo = inSecondRoot.TryAcquire(TimeSpan.Zero);
+
+        Assert.NotNull(leaseTwo);
+    }
+
+    [Fact]
+    public void ALeaseDisposedTwice_NeverReleasesTheNextLease()
+    {
+        using var lk = new LifecycleLock();
+        var stale = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(stale);
+        stale.Dispose();
+
+        using var current = lk.TryAcquire(TimeSpan.Zero);
+        Assert.NotNull(current);
+        stale.Dispose();
+
+        using var other = new LifecycleLock();
+        Assert.Null(other.TryAcquire(TimeSpan.Zero));
     }
 }
