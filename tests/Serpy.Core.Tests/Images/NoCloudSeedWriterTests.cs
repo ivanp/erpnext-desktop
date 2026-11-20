@@ -113,7 +113,7 @@ public sealed class NoCloudSeedWriterTests : IDisposable
         var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
         var rendered = NoCloudSeedWriter.RenderUserData(
             template,
-            ReadGuestAsset("provision-done.sh"),
+            ReadGuestAsset("provision.sh"),
             ReadGuestAsset("init-data.sh"),
             ReadGuestAsset("recover.sh"));
         var iso = Path.Combine(_dir, "production-seed.iso");
@@ -130,9 +130,9 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     }
 
     [Fact]
-    public void ProductionCloudInit_UsesImmutableRepositoriesAndLockedArtifacts()
+    public void ProvisioningScript_UsesImmutableRepositoriesAndLockedArtifacts()
     {
-        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+        var template = ReadGuestAsset("provision.sh");
 
         Assert.Contains("snapshot.debian.org/archive/debian/20260822T000000Z/ trixie main", template);
         Assert.Contains("snapshot.debian.org/archive/debian/20260822T000000Z/ sid main", template);
@@ -146,9 +146,9 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     }
 
     [Fact]
-    public void ProductionCloudInit_ChecksOutExactApplicationCommits()
+    public void ProvisioningScript_ChecksOutExactApplicationCommits()
     {
-        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+        var template = ReadGuestAsset("provision.sh");
 
         Assert.Contains("git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99", template);
         Assert.Contains("git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325", template);
@@ -156,9 +156,9 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     }
 
     [Fact]
-    public void ProductionCloudInit_InstallsCurlBeforeMariaDbKeyDownload()
+    public void ProvisioningScript_InstallsCurlBeforeMariaDbKeyDownload()
     {
-        var template = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cloud-init", "user-data"));
+        var template = ReadGuestAsset("provision.sh");
         var installCurl = template.IndexOf("apt-get install -y curl", StringComparison.Ordinal);
         var keyDownload = template.IndexOf("mariadb-keyring-2025.gpg", StringComparison.Ordinal);
 
@@ -181,30 +181,15 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     }
 
     [Fact]
-    public void RenderUserData_CloudInitBlockContent_MatchesCanonicalScript()
+    public void RenderUserData_EmbedsScriptAsBase64_ThatDecodesToTheCanonicalScript()
     {
-        // Template: six-space indented token under content: |
-        const string template = """
-            #cloud-config
-            write_files:
-              - path: /usr/local/bin/init-data.sh
-                permissions: '0755'
-                content: |
-                  @@SERPY_INIT_DATA@@
-            """;
-
+        const string template = "#cloud-config\nwrite_files:\n  - path: /p.sh\n    encoding: b64\n    content: \"@@SERPY_PROVISION@@\"\n  - path: /usr/local/bin/init-data.sh\n    encoding: b64\n    content: \"@@SERPY_INIT_DATA@@\"\n  - path: /r.sh\n    encoding: b64\n    content: \"@@SERPY_RECOVER@@\"\n";
         const string init = "#!/bin/bash\nset -euo pipefail\necho ready\n";
 
-        var rendered = NoCloudSeedWriter.RenderUserData(template, "", init, "");
+        var rendered = NoCloudSeedWriter.RenderUserData(template, "p", init, "r");
 
-        // No unresolved tokens remain.
         Assert.DoesNotContain("@@SERPY_", rendered);
-
-        // Parse the block scalar the same way cloud-init does:
-        // strip leading block-indent, content must start with shebang at byte 0.
-        var parsed = NoCloudSeedWriter.ExtractWriteFileContent(rendered, "/usr/local/bin/init-data.sh");
-        Assert.NotNull(parsed);
-        Assert.StartsWith("#!/bin/bash\n", parsed, StringComparison.Ordinal);
-        Assert.Equal(init, parsed);
+        var b64 = rendered.Split("content: \"")[2].Split("\"")[0];
+        Assert.Equal(init, System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64)));
     }
 }

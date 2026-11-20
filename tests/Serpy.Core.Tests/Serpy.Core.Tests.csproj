@@ -13,6 +13,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="DiscUtils.Iso9660" />
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <!-- Guest helper scripts copied to build output; credential tests assert file presence. -->
@@ -24,9 +25,9 @@
     <Content Include="..\..\guest\recover.sh"
              CopyToOutputDirectory="PreserveNewest"
              Link="guest\recover.sh" />
-    <Content Include="..\..\guest\provision-done.sh"
+    <Content Include="..\..\guest\provision.sh"
              CopyToOutputDirectory="PreserveNewest"
-             Link="guest\provision-done.sh" />
+             Link="guest\provision.sh" />
     <Content Include="..\..\build\cloud-init\user-data"
              CopyToOutputDirectory="PreserveNewest"
              Link="cloud-init\user-data" />

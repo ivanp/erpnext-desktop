@@ -63,7 +63,7 @@ jobs:
             'publish/win-x64/cloud-init/meta-data',
             'publish/win-x64/guest/init-data.sh',
             'publish/win-x64/guest/recover.sh',
-            'publish/win-x64/guest/provision-done.sh'
+            'publish/win-x64/guest/provision.sh'
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }
           if ($missing) { throw "Missing Native-AOT publish output: $($missing -join ', ')" }

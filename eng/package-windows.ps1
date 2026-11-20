@@ -19,7 +19,7 @@ $required = @(
     'cloud-init\meta-data',
     'guest\init-data.sh',
     'guest\recover.sh',
-    'guest\provision-done.sh'
+    'guest\provision.sh'
 )
 $missing = $required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $publish $_)) }
 if ($missing) {

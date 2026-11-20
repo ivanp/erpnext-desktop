@@ -8,7 +8,7 @@ namespace Serpy.Core.Protocols;
 /// <summary>
 /// Serial-console chardev client over mTLS (KTD9).
 /// Used during cloud-init provisioning before the guest agent exists.
-/// Reads lines from the serial console looking for the provision-done sentinel.
+/// Reads lines from the serial console looking for the provisioning markers.
 /// Both serial and QGA share the same per-install TLS trust material.
 /// </summary>
 public sealed class SerialClient : IAsyncDisposable

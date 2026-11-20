@@ -12,6 +12,6 @@ public sealed class PackagingAssetTests
         Assert.True(File.Exists(Path.Combine(root, "cloud-init", "meta-data")));
         Assert.True(File.Exists(Path.Combine(root, "guest", "init-data.sh")));
         Assert.True(File.Exists(Path.Combine(root, "guest", "recover.sh")));
-        Assert.True(File.Exists(Path.Combine(root, "guest", "provision-done.sh")));
+        Assert.True(File.Exists(Path.Combine(root, "guest", "provision.sh")));
     }
 }

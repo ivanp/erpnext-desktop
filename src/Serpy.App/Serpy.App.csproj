@@ -37,7 +37,7 @@
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\guest\recover.sh" Link="guest\recover.sh"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="..\..\guest\provision-done.sh" Link="guest\provision-done.sh"
+    <Content Include="..\..\guest\provision.sh" Link="guest\provision.sh"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

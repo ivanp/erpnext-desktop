@@ -90,7 +90,7 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
             new NoCloudSeedWriter(
                 NoCloudSeedWriter.RenderUserData(
                     File.ReadAllText(Path.Combine(cloudInitDir, "user-data")),
-                    File.ReadAllText(FindGuestHelper("provision-done.sh")),
+                    File.ReadAllText(FindGuestHelper("provision.sh")),
                     File.ReadAllText(FindGuestHelper("init-data.sh")),
                     File.ReadAllText(FindGuestHelper("recover.sh"))),
                 File.ReadAllText(Path.Combine(cloudInitDir, "meta-data"))),

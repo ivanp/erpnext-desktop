@@ -23,64 +23,21 @@ public sealed class NoCloudSeedWriter
         _metaData = metaData;
     }
 
-    /// <summary>Renders canonical guest helpers into the cloud-init template.</summary>
+    /// <summary>
+    /// Embeds the canonical guest scripts into the cloud-init template as base64, so that no
+    /// script byte can change how the YAML parses (KTD1). Line endings are normalized to LF
+    /// first, because a CR in a shebang line stops the script from starting.
+    /// </summary>
     public static string RenderUserData(
         string template,
-        string provisionDoneScript,
+        string provisionScript,
         string initDataScript,
         string recoverScript) =>
-        ReplaceToken(
-            ReplaceToken(
-                ReplaceToken(template, "@@SERPY_PROVISION_DONE@@", provisionDoneScript),
+        EmbedScript(
+            EmbedScript(
+                EmbedScript(template, "@@SERPY_PROVISION@@", provisionScript),
                 "@@SERPY_INIT_DATA@@", initDataScript),
             "@@SERPY_RECOVER@@", recoverScript);
-
-    /// <summary>Parse the selected cloud-init <c>content: |</c> block.</summary>
-    public static string? ExtractWriteFileContent(string renderedUserData, string guestPath)
-    {
-        var lines = renderedUserData.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var targetFound = false;
-        var inContent = false;
-        var blockIndent = -1;
-        var body = new StringBuilder();
-
-        foreach (var raw in lines)
-        {
-            var trimmed = raw.TrimStart();
-            if (!targetFound)
-            {
-                if (trimmed.StartsWith("- path:", StringComparison.Ordinal) ||
-                    trimmed.StartsWith("path:", StringComparison.Ordinal))
-                {
-                    var value = trimmed[(trimmed.IndexOf(':') + 1)..].Trim().Trim('"', '\'');
-                    targetFound = string.Equals(value, guestPath, StringComparison.Ordinal);
-                }
-                continue;
-            }
-
-            if (!inContent)
-            {
-                if (trimmed.StartsWith("content: |", StringComparison.Ordinal))
-                    inContent = true;
-                else if (trimmed.StartsWith("- path:", StringComparison.Ordinal))
-                    return null;
-                continue;
-            }
-
-            if (trimmed.Length == 0)
-            {
-                body.Append('\n');
-                continue;
-            }
-
-            var indent = raw.Length - trimmed.Length;
-            if (blockIndent < 0) blockIndent = indent;
-            if (indent < blockIndent) break;
-            body.Append(raw[blockIndent..]).Append('\n');
-        }
-
-        return inContent ? body.ToString().TrimEnd('\n', '\r', ' ') + "\n" : null;
-    }
 
     /// <summary>Write a standards-conforming ISO 9660 seed with two files.</summary>
     public void Write(string outputPath)
@@ -230,14 +187,14 @@ public sealed class NoCloudSeedWriter
         return result;
     }
 
-    private static string ReplaceToken(string template, string token, string script)
+    private static string EmbedScript(string template, string token, string script)
     {
-        var idx = template.IndexOf(token, StringComparison.Ordinal);
-        if (idx < 0) return template;
-        var lineStart = template.LastIndexOf('\n', idx) + 1;
-        var indent = template[lineStart..idx];
-        var normalized = script.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n');
-        return template.Replace(token, string.Join("\n" + indent, normalized.Split('\n')), StringComparison.Ordinal);
+        if (!template.Contains(token, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The cloud-init template has no {token} placeholder.");
+        var lf = script.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(lf));
+        return template.Replace(token, b64, StringComparison.Ordinal);
     }
 
     private static int SectorsFor(int length) => Math.Max(1, (length + SectorSize - 1) / SectorSize);
