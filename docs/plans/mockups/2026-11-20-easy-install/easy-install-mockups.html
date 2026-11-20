@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Serpy — easy install mockups</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1a1d21;
+    --muted: #6b7280;
+    --line: #e3e6ea;
+    --brand: #2f6f4f;       /* serpy green */
+    --brand-ink: #1c4a34;
+    --ok: #2e9e5b;
+    --warn: #c98a1b;
+    --bad: #c2402f;
+    --idle: #9aa3ad;
+    --accent: #2563eb;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 12px rgba(16,24,40,.06);
+    font-synthesis: none;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
+    line-height: 1.45;
+  }
+  header.page { padding: 28px 32px 8px; max-width: 1180px; margin: 0 auto; }
+  header.page h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.01em; }
+  header.page p { margin: 0 0 6px; color: var(--muted); font-size: 14px; max-width: 900px; }
+  header.page code, .legend code, .note code { background:#eef1f4; padding:1px 5px; border-radius:4px; color:#334; font-size: 12px; }
+  .ph { border-bottom: 1px dotted #9aa3ad; }
+
+  .flow { max-width: 1180px; margin: 10px auto 0; padding: 0 32px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+  .flow a { text-decoration: none; color: var(--brand-ink); background: #e7f1ec; border-radius: 999px; padding: 4px 11px; font-weight: 600; }
+  .flow a.alt { background: #eef1f4; color: #55606b; }
+  .flow span { color: var(--idle); }
+
+  .grid {
+    max-width: 1180px; margin: 0 auto; padding: 8px 32px 56px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px;
+  }
+  .grid > .group {
+    grid-column: 1 / -1; margin: 22px 0 -10px; font-size: 16px; letter-spacing: -.01em;
+    padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  }
+  .cell.wide { grid-column: 1 / -1; }
+  .cell > h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .cell > .note { font-size: 12.5px; color: var(--muted); margin: 8px 2px 0; }
+  .cell > .note b { color: #3d4650; }
+
+  /* ---- window chrome ---- */
+  .win {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .titlebar {
+    height: 34px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: #fbfbfc; border-bottom: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted);
+  }
+  .titlebar .title { font-weight: 600; color: var(--ink); }
+  .titlebar .spacer { flex: 1; }
+  .titlebar .ctl { letter-spacing: .5em; }
+  .logo { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--brand-ink); }
+  .mark {
+    width: 20px; height: 20px; border-radius: 6px; background: var(--brand);
+    color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none;
+  }
+  .mark.sm { width: 16px; height: 16px; border-radius: 5px; font-size: 10px; }
+  .mark.xl { width: 56px; height: 56px; border-radius: 15px; font-size: 28px; }
+  .body { padding: 18px 22px 20px; }
+  .body h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
+  .body p { margin: 0 0 12px; font-size: 13.5px; }
+  .body p.sub { color: var(--muted); font-size: 13px; }
+  .center { text-align: center; }
+  .center .mark.xl { margin: 6px auto 14px; }
+
+  /* ---- stepper ---- */
+  .stepper { display: flex; gap: 6px; margin: 0 0 18px; padding: 0; list-style: none; font-size: 11.5px; color: var(--muted); }
+  .stepper li { flex: 1; text-align: center; padding-top: 7px; border-top: 3px solid var(--line); }
+  .stepper li.done { border-color: var(--ok); color: #1c6b3a; }
+  .stepper li.now { border-color: var(--brand); color: var(--ink); font-weight: 700; }
+
+  /* ---- buttons ---- */
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  .actions.end { justify-content: flex-end; }
+  .actions.mid { justify-content: center; }
+  .btn {
+    appearance: none; border: 1px solid #cfd5dc; background: #fff; color: var(--ink);
+    padding: 9px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 600; font-family: inherit;
+    cursor: default; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.big { padding: 12px 30px; font-size: 15px; }
+  .btn.sm { padding: 4px 10px; font-size: 12px; font-weight: 600; }
+
+  /* ---- progress ---- */
+  .stage { font-size: 13.5px; font-weight: 600; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
+  .stage .count { color: var(--muted); font-weight: 500; font-size: 12.5px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; border-radius: 999px; background: #eef1f4; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: linear-gradient(90deg,var(--brand),#3f9268); border-radius: 999px; }
+  .bar.thin { height: 6px; }
+  .bar.indet > span { width: 40%; animation: slide 1.3s infinite ease-in-out; }
+  @keyframes slide { 0%{margin-left:-40%} 100%{margin-left:100%} }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .now-line {
+    margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f4f8f6; border: 1px solid #dbe9e2;
+    font-size: 12.5px; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center;
+  }
+  .now-line .bar { grid-column: 1 / -1; }
+  .now-line .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hint { font-size: 12px; color: var(--muted); margin: 12px 0 0; }
+
+  /* ---- checklist ---- */
+  .checks { list-style: none; margin: 14px 0 0; padding: 0; font-size: 13.5px; }
+  .checks li { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+  .checks .ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #fff; flex: none; font-weight: 700; }
+  .ic.ok { background: var(--ok); } .ic.work { background: var(--warn); animation: pulse 1.2s infinite; }
+  .ic.todo { background: #cdd3da; color: #6b7280; } .ic.bad { background: var(--bad); }
+  .checks li .lbl { flex: 1; }
+  .checks li .val { color: var(--muted); font-size: 12.5px; }
+  .checks li.pending .lbl { color: var(--muted); }
+  .checks li.fail .lbl { font-weight: 600; }
+
+  /* ---- facts + checkbox ---- */
+  .facts { list-style: none; margin: 14px 0 0; padding: 12px 14px; background: #f7f8fa; border-radius: 8px; font-size: 13px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+  .facts li { display: flex; gap: 8px; align-items: baseline; }
+  .facts li::before { content: "•"; color: var(--brand); font-weight: 800; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; font-size: 13.5px; }
+  .cb { width: 18px; height: 18px; border-radius: 4px; background: var(--brand); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none; margin-top: 1px; }
+  .opt small { display: block; color: var(--muted); font-size: 12px; }
+
+  /* ---- downloads ---- */
+  .dl { list-style: none; margin: 14px 0 0; padding: 0; }
+  .dl li { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .dl .nm { font-weight: 600; }
+  .dl .nm small { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
+  .dl .st { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .dl .bar { grid-column: 1 / -1; }
+  .dl li.done .st { color: #1c6b3a; font-weight: 600; }
+  .dl li.done .bar > span { background: var(--ok); }
+  .dl li.wait .nm, .dl li.wait .st { color: #8b94a0; font-weight: 500; }
+
+  /* ---- details ---- */
+  .details { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 12px; }
+  .details summary { cursor: pointer; font-size: 12.5px; color: var(--accent); font-weight: 600; list-style: none; user-select: none; }
+  .details summary::-webkit-details-marker { display: none; }
+  .details summary::before { content: "▸ "; }
+  .details[open] summary::before { content: "▾ "; }
+  .details .tools { float: right; display: flex; gap: 6px; margin-top: -4px; }
+  .log {
+    margin-top: 12px; background: #10151b; color: #cbd5e1; border-radius: 8px;
+    padding: 10px 12px; font-family: "Cascadia Code", ui-monospace, Menlo, monospace;
+    font-size: 11.5px; line-height: 1.6; white-space: pre; overflow: auto; height: 300px; clear: both;
+  }
+  .log .mut { color: #7c8794; } .log .g { color: #7fd39b; } .log .y { color: #e6c15a; }
+  .kv { margin: 12px 0 0; font-size: 12.5px; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+
+  /* ---- banners ---- */
+  .banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 8px; background: #fbecea; border: 1px solid #f2c9c2; margin-bottom: 4px; }
+  .banner .bic { width: 22px; height: 22px; border-radius: 50%; background: var(--bad); color: #fff; display: grid; place-items: center; font-weight: 800; flex: none; font-size: 13px; }
+  .banner h4 { margin: 0 0 3px; font-size: 14.5px; color: #7f2419; }
+  .banner p { margin: 0; font-size: 13px; color: #6d281f; }
+  .banner p + p { margin-top: 6px; }
+  .banner.warn { background: #fdf5e4; border-color: #f0dba8; }
+  .banner.warn .bic { background: var(--warn); }
+  .banner.warn h4 { color: #6f4a0c; } .banner.warn p { color: #6b4d18; }
+  .or { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--idle); margin: 16px 0 8px; font-weight: 700; }
+
+  /* ---- sign-in card ---- */
+  .cred { margin: 16px auto 0; max-width: 340px; border: 1px solid var(--line); border-radius: 10px; text-align: left; font-size: 13.5px; }
+  .cred .h { padding: 8px 14px; background: #f7f8fa; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); font-weight: 600; border-radius: 10px 10px 0 0; }
+  .cred .r { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
+  .cred .r + .r { border-top: 1px solid var(--line); }
+  .cred .r span { color: var(--muted); width: 84px; font-size: 12.5px; }
+  .cred .r b { flex: 1; font-family: "Cascadia Code", ui-monospace, monospace; font-weight: 600; }
+  .bigcheck { width: 56px; height: 56px; border-radius: 50%; background: var(--ok); color: #fff; display: grid; place-items: center; font-size: 30px; font-weight: 800; margin: 4px auto 12px; }
+  .field { margin-top: 12px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; }
+  .field .in { border: 1px solid #b9c1ca; border-radius: 8px; padding: 9px 12px; font-size: 14px; display: flex; justify-content: space-between; color: var(--ink); letter-spacing: .15em; }
+  .field .in em { font-style: normal; letter-spacing: 0; color: var(--accent); font-size: 12px; font-weight: 600; }
+
+  /* ---- hero (everyday window) ---- */
+  .hero { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+  .badge .led { width: 10px; height: 10px; border-radius: 50%; }
+  .badge.ok { background: #e7f6ec; color: #1c6b3a; } .badge.ok .led { background: var(--ok); }
+
+  /* ---- tray ---- */
+  .tray-stage { background: linear-gradient(160deg,#1b2430,#0f151d); padding: 24px; border-radius: var(--radius); position: relative; --ring: #141b24; }
+  .states { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .state { text-align: center; color: #cbd5e1; font-size: 12.5px; }
+  .state svg { width: 46px; height: 46px; }
+  .state b { display: block; color: #fff; font-size: 13.5px; margin: 6px 0 8px; }
+  .tip { display: inline-block; background: #2b3542; color: #e8edf3; border: 1px solid #44505f; border-radius: 4px; padding: 4px 9px; font-size: 12px; }
+  .state small { display: block; margin-top: 8px; color: #94a1b0; font-size: 11.5px; line-height: 1.4; }
+  .tray-stage.tall { min-height: 330px; }
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: rgba(255,255,255,.06); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 16px; border-radius: 0 0 var(--radius) var(--radius); }
+  .tray-icons { display: flex; gap: 12px; align-items: center; color: #cbd5e1; font-size: 12px; }
+  .tray-icons svg { width: 22px; height: 22px; }
+  .clock { color: #cbd5e1; font-size: 12px; }
+  .menu { position: absolute; right: 16px; bottom: 52px; width: 250px; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4); overflow: hidden; font-size: 13px; --ring: #fff; }
+  .menu .head { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  .menu .head svg { width: 26px; height: 26px; flex: none; }
+  .menu .head b { font-size: 13px; display: block; }
+  .menu .head small { color: var(--muted); display: block; font-size: 11.5px; }
+  .menu ul { list-style: none; margin: 0; padding: 6px 0; }
+  .menu li { padding: 8px 14px; display: flex; align-items: center; gap: 10px; }
+  .menu li.def { font-weight: 700; }
+  .menu li.sep { padding: 0; margin: 6px 0; border-top: 1px solid var(--line); }
+  .menu li .k { width: 16px; text-align: center; color: var(--brand); font-weight: 800; }
+  .toasts { display: grid; gap: 14px; justify-items: end; padding-bottom: 46px; }
+  .toast { width: 330px; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4); padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; font-size: 13px; --ring: #fff; }
+  .toast svg { width: 30px; height: 30px; flex: none; }
+  .toast b { display: block; font-size: 13.5px; }
+  .toast span { color: #4b5563; }
+  .toast small { display: block; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+
+  /* ---- tray icon parts ---- */
+  .tico .sq { fill: var(--brand); }
+  .tico .s { fill: #fff; font: 800 15px "Segoe UI", system-ui, sans-serif; }
+  .tico .ring { stroke: var(--ring, #fff); stroke-width: 2; }
+  .tico .w { fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- wording table ---- */
+  table.words { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; font-size: 13px; box-shadow: var(--shadow); }
+  table.words th, table.words td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.words th { background: #f7f8fa; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  table.words td:first-child { color: var(--muted); font-family: "Cascadia Code", ui-monospace, monospace; font-size: 12px; width: 38%; }
+  table.words tr:last-child td { border-bottom: 0; }
+
+  .legend { max-width: 1180px; margin: 0 auto; padding: 0 32px 48px; color: var(--muted); font-size: 12.5px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .states { grid-template-columns: repeat(2, 1fr); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+
+<!-- tray icon symbols: same mark, a badge whose SHAPE changes with the state -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-setup" viewBox="0 0 32 32" class="tico">
+    <rect class="sq" x="2" y="2" width="24" height="24" rx="6"/><text class="s" x="14" y="19.5" text-anchor="middle">S</text>
+    <circle class="ring" cx="23" cy="23" r="8" fill="#c98a1b"/><path class="w" d="M23 18.6v7.6M19.8 23.2l3.2 3.2 3.2-3.2"/>
+  </symbol>
+  <symbol id="i-start" viewBox="0 0 32 32" class="tico">
+    <rect class="sq" x="2" y="2" width="24" height="24" rx="6"/><text class="s" x="14" y="19.5" text-anchor="middle">S</text>
+    <circle class="ring" cx="23" cy="23" r="8" fill="#c98a1b"/>
+    <circle cx="19.2" cy="23" r="1.4" fill="#fff"/><circle cx="23" cy="23" r="1.4" fill="#fff"/><circle cx="26.8" cy="23" r="1.4" fill="#fff"/>
+  </symbol>
+  <symbol id="i-ready" viewBox="0 0 32 32" class="tico">
+    <rect class="sq" x="2" y="2" width="24" height="24" rx="6"/><text class="s" x="14" y="19.5" text-anchor="middle">S</text>
+    <circle class="ring" cx="23" cy="23" r="8" fill="#2e9e5b"/><path class="w" d="M19.3 23.3l2.6 2.6 4.9-5.3"/>
+  </symbol>
+  <symbol id="i-stop" viewBox="0 0 32 32" class="tico">
+    <rect class="sq" x="2" y="2" width="24" height="24" rx="6"/><text class="s" x="14" y="19.5" text-anchor="middle">S</text>
+    <rect class="ring" x="15.5" y="15.5" width="15" height="15" rx="3" fill="#8b95a1"/><rect x="20" y="20" width="6" height="6" rx="1" fill="#fff"/>
+  </symbol>
+  <symbol id="i-attn" viewBox="0 0 32 32" class="tico">
+    <rect class="sq" x="2" y="2" width="24" height="24" rx="6"/><text class="s" x="14" y="19.5" text-anchor="middle">S</text>
+    <path class="ring" d="M23 13.5 31.5 30h-17z" fill="#c2402f" stroke-linejoin="round"/><path class="w" d="M23 20v4.6"/><circle cx="23" cy="27.4" r="1.3" fill="#fff"/>
+  </symbol>
+</svg>
+
+<header class="page">
+  <h1>Serpy — easy install mockups</h1>
+  <p>Screens for <code>docs/plans/2026-11-20-2151-feat-easy-install-experience-plan.md</code>. Each note names the requirement it draws (R1–R40).</p>
+  <p>Directional: judge the order of screens, what each one shows and the wording. Colours and exact sizes are not final. Numbers with a <span class="ph">dotted underline</span> are placeholders until one full install has been measured.</p>
+</header>
+
+<nav class="flow" aria-label="Screen order">
+  <a href="#s1">1 Installer</a><span>→</span>
+  <a href="#s2">2 Welcome</a><span>→</span>
+  <a href="#s3">3 PC check</a><span>→</span>
+  <a class="alt" href="#s5">if needed: Restart</a><span>→</span>
+  <a href="#s6">4 Downloads</a><span>→</span>
+  <a href="#s8">5 Installing</a><span>→</span>
+  <a href="#s11">6 Ready</a><span>·</span>
+  <a class="alt" href="#s12">Problems</a>
+  <a class="alt" href="#s15">Tray</a>
+  <a class="alt" href="#s18">Everyday window</a>
+  <a class="alt" href="#s19">Wording</a>
+</nav>
+
+<div class="grid">
+
+  <h2 class="group">A · Install and check</h2>
+
+  <section class="cell" id="s1">
+    <h2>1 · Installer</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy Setup</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body center">
+        <div class="mark xl">S</div>
+        <h3>Install Serpy</h3>
+        <p class="sub">Serpy runs ERPNext, your business software, on this PC.</p>
+        <div class="actions mid"><button class="btn primary big">Install</button></div>
+        <p class="hint">Windows will ask for permission to install.</p>
+      </div>
+    </div>
+    <p class="note"><b>R1.</b> One click. No folder, no options. When it finishes, the next screen opens by itself (<b>R2</b>).</p>
+  </section>
+
+  <section class="cell" id="s2">
+    <h2>2 · Welcome</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <h3>Set up ERPNext on this PC</h3>
+        <p>Serpy will download ERPNext and put it together on this PC. You don't have to do anything while it works.</p>
+        <ul class="facts">
+          <li>Takes about <span class="ph">1 hour</span></li>
+          <li>Needs about <span class="ph">30 GB</span> of free space</li>
+          <li>Needs the internet until the downloads finish</li>
+          <li>You can keep using your PC</li>
+        </ul>
+        <div class="opt"><span class="cb">✓</span><div>Start Serpy when I sign in to Windows<small>ERPNext will be ready a minute or two after you sign in. You can change this later.</small></div></div>
+        <div class="actions end"><button class="btn primary big">Start setup</button></div>
+      </div>
+    </div>
+    <p class="note"><b>R3, R31.</b> The only click and the only choice in a normal setup. The box is ticked by default. No site name, password, file or folder.</p>
+  </section>
+
+  <section class="cell" id="s3">
+    <h2>3 · Checking your PC</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="now">Check PC</li><li>Download</li><li>Install</li><li>Company data</li><li>Start</li></ol>
+        <h3>Checking that this PC can run ERPNext</h3>
+        <ul class="checks">
+          <li><span class="ic ok">✓</span><span class="lbl">Windows version</span><span class="val">Windows 11, 64-bit</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Memory</span><span class="val">16 GB · needs <span class="ph">8 GB</span></span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Free space</span><span class="val">212 GB · needs <span class="ph">30 GB</span></span></li>
+          <li><span class="ic work">•</span><span class="lbl">Can run ERPNext</span><span class="val">checking…</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Internet connection</span></li>
+        </ul>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R4.</b> Runs before any large download. When everything passes, setup moves on without a click. Show details is on every screen from here (<b>R29</b>).</p>
+  </section>
+
+  <section class="cell" id="s4">
+    <h2>3b · PC check — this PC can't run Serpy yet</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <div class="banner">
+          <span class="bic">!</span>
+          <div><h4>This PC doesn't have enough free space</h4>
+          <p>Serpy needs about <span class="ph">30 GB</span>. This PC has 11 GB free.</p>
+          <p><b>What to do:</b> free up some space, then check again.</p></div>
+        </div>
+        <div class="actions end"><button class="btn">Close</button><button class="btn primary">Check again</button></div>
+        <p class="or">Other case, same screen</p>
+        <div class="banner">
+          <span class="bic">!</span>
+          <div><h4>A setting this PC needs is turned off</h4>
+          <p>The setting is called <b>virtualization</b>. It lets Serpy run ERPNext inside Windows. Serpy can't turn it on, because it lives in the PC's startup settings.</p>
+          <p><b>What to do:</b> ask the person who looks after this PC to turn on virtualization, then check again.</p></div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>R5, R40.</b> Setup stops here, before downloading anything. A technical word appears only because the user has to pass it on, and it is explained in one sentence.</p>
+  </section>
+
+  <section class="cell" id="s5">
+    <h2>If needed · Windows restart</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="now">Check PC</li><li>Download</li><li>Install</li><li>Company data</li><li>Start</li></ol>
+        <h3>Windows needs to restart</h3>
+        <p>Serpy turned on a Windows feature that it needs to run ERPNext. The feature starts working after a restart.</p>
+        <p>Setup continues by itself when you sign in again.</p>
+        <p class="hint">Save your work in other programs first.</p>
+        <div class="actions end"><button class="btn">Later</button><button class="btn primary">Restart now</button></div>
+      </div>
+    </div>
+    <p class="note"><b>R6, R7.</b> Only on PCs where the feature is off. Windows asks for permission once before this screen.</p>
+  </section>
+
+  <section class="cell" id="s14">
+    <h2>If needed · Password for existing data</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <h3>ERPNext needs your password</h3>
+        <p>Serpy found your company data from an earlier setup. The password Serpy has saved doesn't open it.</p>
+        <div class="field"><label>Password for the ERPNext user "Administrator"</label><div class="in"><span>••••••••••</span><em>Show</em></div></div>
+        <p class="hint">Serpy keeps the password on this PC, locked to your Windows account. It uses it only to check that ERPNext is working.</p>
+        <div class="actions end"><button class="btn">Cancel</button><button class="btn primary">Continue</button></div>
+      </div>
+    </div>
+    <p class="note"><b>R9, R13.</b> Existing data is used without asking. This is the only password question, and it appears only when the saved password is rejected, including after the password was changed inside ERPNext.</p>
+  </section>
+
+  <h2 class="group">B · Download and install</h2>
+
+  <section class="cell" id="s6">
+    <h2>4 · Downloads</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="now">Download</li><li>Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="stage">Downloading what ERPNext needs <span class="count">3 of 8 parts · <span class="ph">1.3 of 3.4 GB</span></span></div>
+        <div class="bar"><span style="width:38%"></span></div>
+        <ul class="dl">
+          <li class="done"><span class="nm">Serpy engine</span><span class="st">✓ Done · <span class="ph">180 MB</span></span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">Operating system for ERPNext</span><span class="st">✓ Done · 341 MB</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">Database</span><span class="st">✓ Done · <span class="ph">95 MB</span></span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li><span class="nm">System tools<small><span class="ph">212</span> files</small></span><span class="st"><span class="ph">310 of 480 MB</span></span><div class="bar thin"><span style="width:64%"></span></div></li>
+          <li><span class="nm">Language tools<small><span class="ph">148</span> files</small></span><span class="st"><span class="ph">96 of 310 MB</span></span><div class="bar thin"><span style="width:31%"></span></div></li>
+          <li><span class="nm">Web tools<small><span class="ph">489</span> files</small></span><span class="st"><span class="ph">44 of 360 MB</span></span><div class="bar thin"><span style="width:12%"></span></div></li>
+          <li><span class="nm">ERPNext framework</span><span class="st">Checking…</span><div class="bar thin indet"><span></span></div></li>
+          <li class="wait"><span class="nm">ERPNext</span><span class="st">Waiting</span><div class="bar thin"><span style="width:0"></span></div></li>
+        </ul>
+        <div class="actions end"><button class="btn">Cancel</button></div>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R15–R17.</b> Several parts download at once, each with its own bar, state and size. A part made of many small files gets one bar and a file count; the single files are listed under Show details.</p>
+  </section>
+
+  <section class="cell" id="s7">
+    <h2>4b · Downloads — running setup again</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="now">Download</li><li>Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="stage">Almost nothing to download <span class="count">7 of 8 parts already on this PC</span></div>
+        <div class="bar"><span style="width:94%"></span></div>
+        <ul class="dl">
+          <li class="done"><span class="nm">Serpy engine</span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">Operating system for ERPNext</span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">Database</span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li><span class="nm">System tools<small><span class="ph">212</span> files</small></span><span class="st">1 file downloading again</span><div class="bar thin"><span style="width:97%"></span></div></li>
+          <li class="done"><span class="nm">Language tools<small><span class="ph">148</span> files</small></span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">Web tools<small><span class="ph">489</span> files</small></span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">ERPNext framework</span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+          <li class="done"><span class="nm">ERPNext</span><span class="st">✓ Already on this PC</span><div class="bar thin"><span style="width:100%"></span></div></li>
+        </ul>
+        <p class="hint">One saved file was damaged, so Serpy is downloading that file again.</p>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R18, R19, R27.</b> A file that was downloaded and checked is never downloaded again. A saved file that fails its check is fetched once more and the bad copy is not used.</p>
+  </section>
+
+  <section class="cell" id="s8">
+    <h2>5 · Installing</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="done">Download</li><li class="now">Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="stage">Installing ERPNext <span class="count">about <span class="ph">35 min</span> left</span></div>
+        <div class="bar"><span style="width:46%"></span></div>
+        <ul class="checks">
+          <li><span class="ic ok">✓</span><span class="lbl">Preparing the operating system</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Installing the database</span></li>
+          <li><span class="ic work">•</span><span class="lbl">Installing ERPNext</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Preparing the ERPNext screens</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Creating your company database</span></li>
+          <li class="pending"><span class="ic todo">•</span><span class="lbl">Starting ERPNext and checking that it works</span></li>
+        </ul>
+        <div class="now-line"><span><b>Now:</b> adding ERPNext parts, <span class="ph">214 of 489</span></span><span class="t"><span class="ph">12 min</span> on this step</span><div class="bar thin indet"><span></span></div></div>
+        <p class="hint">Your PC will stay awake until setup finishes. You can close this window; setup keeps going next to the clock.</p>
+        <div class="actions end"><button class="btn">Cancel</button></div>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R20, R22, R23, R25, R26.</b> Uses only the downloaded files, so the internet can be off. The bar moves as work completes, and the "Now" line changes every few seconds so working is never mistaken for stuck.</p>
+  </section>
+
+  <section class="cell" id="s9">
+    <h2>5b · Installing — a step has gone quiet</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="done">Download</li><li class="now">Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="banner warn">
+          <span class="bic">!</span>
+          <div><h4>This step is taking longer than usual</h4>
+          <p>Nothing new has happened for <span class="ph">10 minutes</span>. It may still be working.</p>
+          <p><b>What to do:</b> keep waiting, or try this step again. Trying again downloads nothing.</p></div>
+        </div>
+        <ul class="checks">
+          <li><span class="ic ok">✓</span><span class="lbl">Preparing the operating system</span></li>
+          <li><span class="ic ok">✓</span><span class="lbl">Installing the database</span></li>
+          <li class="fail"><span class="ic work">•</span><span class="lbl">Installing ERPNext</span><span class="val"><span class="ph">31 min</span> on this step</span></li>
+        </ul>
+        <div class="actions end"><button class="btn">Try again</button><button class="btn primary">Keep waiting</button></div>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R24.</b> Setup says so itself when a step stops producing activity, instead of leaving a still bar on screen.</p>
+  </section>
+
+  <section class="cell wide" id="s10">
+    <h2>5c · Installing — Show details open, window maximized</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="done">Download</li><li class="now">Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="stage">Installing ERPNext <span class="count">about <span class="ph">35 min</span> left</span></div>
+        <div class="bar"><span style="width:46%"></span></div>
+        <div class="now-line"><span><b>Now:</b> adding ERPNext parts, <span class="ph">214 of 489</span></span><span class="t"><span class="ph">12 min</span> on this step</span><div class="bar thin indet"><span></span></div></div>
+        <details class="details" open>
+          <summary>Hide details</summary>
+          <span class="tools"><button class="btn sm">Copy</button><button class="btn sm">Save details…</button></span>
+<div class="log"><span class="mut">21:02:11  check     Windows 11 Pro 26200, x64 .................................. ok</span>
+<span class="mut">21:02:11  check     memory 16 GB, free space 212 GB ............................ ok</span>
+<span class="mut">21:02:12  check     Windows Hypervisor Platform ................................ on</span>
+<span class="mut">21:02:13  check     internet: snapshot.debian.org, archive.mariadb.org, github.com ok</span>
+21:02:14  download  qemu-w64-setup-20260811.exe ............ sha256 ok  <span class="g">already on this PC</span>
+21:02:15  download  debian-13-genericcloud-amd64-20260819-2575.qcow2  sha512 ok  <span class="g">already on this PC</span>
+21:03:40  download  mariadb-server_11.8.3+maria~deb13_amd64.deb ..... sha256 ok
+21:03:41  download  node-v24.2.0-linux-x64.tar.xz ................... sha256 ok
+21:09:52  download  849 of 849 files checked, 0 failed
+21:10:03  install   [1/6] preparing the operating system (network: off)
+21:14:26  install   [2/6] mariadb-server 11.8.3, redis-server 8.0.2 ....... <span class="g">installed</span>
+21:19:05  install   [3/6] frappe 16.31.0 @ 6a329d06, erpnext 16.32.3 @ 11e0ba0a
+21:24:48  install   python libraries 148 of 148 ............................ <span class="g">installed</span>
+<span class="y">21:31:17  install   web libraries 214 of 489 (offline, frozen lockfile)</span></div>
+        </details>
+      </div>
+    </div>
+    <p class="note"><b>R29.</b> Details start at the PC check, not halfway through, and the panel grows with the window. This is the one place technical names appear (<b>R39</b>). The lines are samples: versions and base file names are the ones pinned in the repo today, while times and counts are placeholders.</p>
+  </section>
+
+  <h2 class="group">C · Finished, or something went wrong</h2>
+
+  <section class="cell" id="s11">
+    <h2>6 · Ready</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body center">
+        <div class="bigcheck">✓</div>
+        <h3>Serpy is ready</h3>
+        <p class="sub">ERPNext is running on this PC.</p>
+        <div class="cred">
+          <div class="h">Sign in to ERPNext with</div>
+          <div class="r"><span>Username</span><b>Administrator</b><button class="btn sm">Copy</button></div>
+          <div class="r"><span>Password</span><b>admin</b><button class="btn sm">Copy</button></div>
+        </div>
+        <div class="actions mid"><button class="btn primary big">Open ERPNext</button></div>
+        <p class="hint">Serpy stays next to the clock and shows whether ERPNext is ready.</p>
+      </div>
+    </div>
+    <p class="note"><b>R12, R30.</b> The browser opens when the user clicks, not by itself. A Windows notification appears at the same moment for people who closed the window (<b>R35</b>).</p>
+  </section>
+
+  <section class="cell" id="s12">
+    <h2>Problem · setup stopped</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <ol class="stepper"><li class="done">Check PC</li><li class="now">Download</li><li>Install</li><li>Company data</li><li>Start</li></ol>
+        <div class="banner">
+          <span class="bic">!</span>
+          <div><h4>Serpy can't reach the internet</h4>
+          <p>Setup stopped while downloading. Nothing is lost: 3 of 8 parts are already on this PC.</p>
+          <p><b>What to do:</b> check that this PC is online, then try again.</p></div>
+        </div>
+        <div class="actions end"><button class="btn">Save details…</button><button class="btn primary">Try again</button></div>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R27, R28.</b> Every problem screen has the same three parts: what happened, what to do, and Try again. Save details writes one file the user can send to whoever helps them.</p>
+  </section>
+
+  <section class="cell" id="s13">
+    <h2>Problem · existing data can't be used</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <div class="banner">
+          <span class="bic">!</span>
+          <div><h4>Serpy found company data on this PC that it can't open</h4>
+          <p>Your data has not been changed. Setup stopped so that nothing is lost.</p>
+          <p><b>What to do:</b> save the details and send them to the person who helps you with Serpy.</p></div>
+        </div>
+        <div class="actions end"><button class="btn">Close</button><button class="btn primary">Save details…</button></div>
+        <details class="details"><summary>Show details</summary></details>
+      </div>
+    </div>
+    <p class="note"><b>R10.</b> Serpy never deletes or overwrites existing company data. There is no "start fresh" button in this version.</p>
+  </section>
+
+  <h2 class="group">D · Every day</h2>
+
+  <section class="cell wide" id="s15">
+    <h2>Tray icon — five states</h2>
+    <div class="tray-stage">
+      <div class="states">
+        <div class="state"><svg><use href="#i-setup"/></svg><b>Setting up</b><span class="tip">Serpy: setting up, step 3 of 5</span><small>Setup is running</small></div>
+        <div class="state"><svg><use href="#i-start"/></svg><b>Starting</b><span class="tip">Serpy: starting ERPNext</span><small>After sign-in or Start</small></div>
+        <div class="state"><svg><use href="#i-ready"/></svg><b>Ready</b><span class="tip">Serpy: ERPNext is ready</span><small>Running and checked</small></div>
+        <div class="state"><svg><use href="#i-stop"/></svg><b>Stopped</b><span class="tip">Serpy: ERPNext is stopped</span><small>Stopped by the user, or setup not finished</small></div>
+        <div class="state"><svg><use href="#i-attn"/></svg><b>Needs attention</b><span class="tip">Serpy: needs attention</span><small>Stopped unexpectedly, or setup failed</small></div>
+      </div>
+    </div>
+    <p class="note"><b>R34.</b> The badge changes shape as well as colour: arrow, dots, tick, square, triangle. Hovering shows the state in words.</p>
+  </section>
+
+  <section class="cell" id="s16">
+    <h2>Tray menu</h2>
+    <div class="tray-stage tall">
+      <div class="menu">
+        <div class="head"><svg><use href="#i-ready"/></svg><div><b>ERPNext is ready</b><small>Running on this PC</small></div></div>
+        <ul>
+          <li class="def"><span class="k">↗</span>Open ERPNext</li>
+          <li><span class="k"></span>Open Serpy</li>
+          <li><span class="k"></span>Stop ERPNext</li>
+          <li class="sep"></li>
+          <li><span class="k">✓</span>Start Serpy when I sign in</li>
+          <li class="sep"></li>
+          <li><span class="k"></span>Exit Serpy</li>
+        </ul>
+      </div>
+      <div class="taskbar"><div class="tray-icons"><span>⌃</span><svg><use href="#i-ready"/></svg><span>🔊</span></div><div class="clock">21:47</div></div>
+    </div>
+    <p class="note"><b>R36.</b> Open ERPNext is the default action. "Stop ERPNext" reads "Start ERPNext" when it is stopped. Starting Serpy again from the Start menu brings its window to the front (<b>R37</b>).</p>
+  </section>
+
+  <section class="cell" id="s17">
+    <h2>Notifications</h2>
+    <div class="tray-stage tall">
+      <div class="toasts">
+        <div class="toast"><svg><use href="#i-ready"/></svg><div><small>Serpy</small><b>ERPNext is ready</b><span>Click to open it in your browser.</span></div></div>
+        <div class="toast"><svg><use href="#i-attn"/></svg><div><small>Serpy</small><b>ERPNext needs attention</b><span>It stopped unexpectedly. Click to see what happened.</span></div></div>
+      </div>
+      <div class="taskbar"><div class="tray-icons"><span>⌃</span><svg><use href="#i-attn"/></svg><span>🔊</span></div><div class="clock">21:47</div></div>
+    </div>
+    <p class="note"><b>R35.</b> Two notifications only: ERPNext became ready, and ERPNext needs attention. Signing in to Windows does not open a browser window (<b>R30</b>).</p>
+  </section>
+
+  <section class="cell wide" id="s18">
+    <h2>Serpy window after setup — Show details open</h2>
+    <div class="win">
+      <div class="titlebar"><span class="mark sm">S</span><span class="title">Serpy</span><span class="spacer"></span><span class="ctl">—▢✕</span></div>
+      <div class="body">
+        <div class="hero"><span class="logo"><span class="mark">S</span>Serpy</span><span class="badge ok"><span class="led"></span>ERPNext is ready</span></div>
+        <p class="sub">ERPNext is running on this PC. It opens in your web browser.</p>
+        <div class="actions" style="margin-top:0"><button class="btn primary">Open ERPNext</button><button class="btn">Stop ERPNext</button></div>
+        <div class="opt"><span class="cb">✓</span><div>Start Serpy when I sign in to Windows</div></div>
+        <details class="details" open>
+          <summary>Hide details</summary>
+          <span class="tools"><button class="btn sm">Restart ERPNext</button><button class="btn sm">Recover…</button><button class="btn sm">Save details…</button></span>
+          <dl class="kv" style="clear:both">
+            <dt>Address</dt><dd>http://127.0.0.1:18080 · works only on this PC</dd>
+            <dt>Sign-in</dt><dd>Administrator · password saved on this PC</dd>
+            <dt>Versions</dt><dd>ERPNext 16.32.3 · Frappe 16.31.0 · MariaDB 11.8.3 · Python 3.14.7 · Node 24.2.0 · Redis 8.0.2</dd>
+            <dt>Data folder</dt><dd>%LOCALAPPDATA%\Serpy</dd>
+          </dl>
+        </details>
+      </div>
+    </div>
+    <p class="note"><b>R38.</b> Closed, the window shows only the state, Open ERPNext, Stop and the sign-in setting. Restart, Recover, the address and versions sit under Show details.</p>
+  </section>
+
+  <h2 class="group">E · Wording</h2>
+
+  <section class="cell wide" id="s19">
+    <h2>Technical term today → what the user reads</h2>
+    <table class="words">
+      <tr><th>Today</th><th>Shown to the user</th></tr>
+      <tr><td>Build · provisioning</td><td>Installing ERPNext</td></tr>
+      <tr><td>Initialize · site creation</td><td>Creating your company database</td></tr>
+      <tr><td>Appliance · VM · QEMU</td><td>ERPNext, or Serpy for the app itself</td></tr>
+      <tr><td>Windows Hypervisor Platform · WHPX</td><td>A Windows feature that Serpy needs to run ERPNext</td></tr>
+      <tr><td>Health check</td><td>Checking that ERPNext works</td></tr>
+      <tr><td>data.img · dataset</td><td>Your company data</td></tr>
+      <tr><td>Crashed</td><td>ERPNext stopped unexpectedly</td></tr>
+      <tr><td>Loopback URL · port</td><td>ERPNext opens in your web browser and works only on this PC</td></tr>
+      <tr><td>Cached download</td><td>Already on this PC</td></tr>
+    </table>
+    <p class="note"><b>R39, R40.</b> The left column appears only under Show details.</p>
+  </section>
+
+</div>
+
+<div class="legend">
+  <p>Not drawn: Windows' own permission prompt (its wording belongs to Windows), and ERPNext's own pages after sign-in.</p>
+</div>
+</body>
+</html>
