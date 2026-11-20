@@ -219,6 +219,16 @@ public sealed partial class DashboardViewModel : ObservableObject
         StageText = "Cancelling…";
     }
 
+    /// <summary>
+    /// An exception from a dispatched operation must not end the app: show it and keep the window
+    /// alive. U9 and U10 replace this code with the typed failure screens.
+    /// </summary>
+    private void ShowUnexpectedFailure(string what, Exception ex)
+    {
+        StageText = $"{what} failed: {ex.Message}";
+        DetailLog += $"\n{ex}\n";
+    }
+
     // ── Progress / log update ─────────────────────────────────────────────
 
     public void ApplyUpdate(OperationUpdate update)
@@ -266,6 +276,10 @@ public sealed partial class DashboardViewModel : ObservableObject
 
             StageText = result.Message;
             if (result.LogPath is { } lp) DetailLog += $"\nLog: {lp}";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ShowUnexpectedFailure(kind.ToString(), ex);
         }
         finally
         {
@@ -334,6 +348,10 @@ public sealed partial class DashboardViewModel : ObservableObject
         {
             StageText = "Setup cancelled.";
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ShowUnexpectedFailure("Setup", ex);
+        }
         finally
         {
             IsOperationRunning = false;
@@ -391,6 +409,10 @@ public sealed partial class DashboardViewModel : ObservableObject
         {
             StageText = "Dataset adoption cancelled.";
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ShowUnexpectedFailure("Dataset adoption", ex);
+        }
         finally
         {
             IsOperationRunning = false;
@@ -422,6 +444,10 @@ public sealed partial class DashboardViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             StageText = "Recovery cancelled.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ShowUnexpectedFailure("Recovery", ex);
         }
         finally
         {

@@ -50,10 +50,16 @@ public sealed class AdoptOperation(
     {
         var logPath = Path.Combine(KnownPaths.LogsDir, $"adopt-{operationId:N}.log");
         Directory.CreateDirectory(KnownPaths.LogsDir);
+        using var log = new OperationLog(logPath);
+        log.Redact(parameters.AdminPassword);
+        stateStore.Mutate(s => s.LogPath = logPath);
 
-        void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info) =>
+        void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(
                 operationId, OperationKind.Adopt, stage, sev, msg, pct, null));
+        }
 
         // 1. Precondition checks
         if (inspection.Verdict == ArchiveInspectionVerdict.Rejected)
@@ -94,7 +100,7 @@ public sealed class AdoptOperation(
         {
             long reqGb = (requiredBytes + (1024 * 1024 * 1024 - 1)) / (1024 * 1024 * 1024);
             long availGb = driveInfo.AvailableFreeSpace / (1024 * 1024 * 1024);
-            return Fail(operationId, $"Insufficient free disk space. Required: {reqGb} GiB, Available: {availGb} GiB.", logPath);
+            return Fail(operationId, $"Insufficient free disk space. Required: {reqGb} GiB, Available: {availGb} GiB.", logPath, FailureCode.DiskFull);
         }
 
         // 3. Sparse-aware single-pass copy computing SHA-256 in stream (KTD4/KTD9)
@@ -121,7 +127,7 @@ public sealed class AdoptOperation(
             !string.Equals(computedDigest, inspection.ExpectedDigest, StringComparison.OrdinalIgnoreCase))
         {
             CleanupPendingCopy();
-            return Fail(operationId, $"Archive SHA-256 digest mismatch. Expected: {inspection.ExpectedDigest}, Computed: {computedDigest}.", logPath);
+            return Fail(operationId, $"Archive SHA-256 digest mismatch. Expected: {inspection.ExpectedDigest}, Computed: {computedDigest}.", logPath, FailureCode.ChecksumMismatch);
         }
 
         // 4. Initialize adoption journal
@@ -170,7 +176,7 @@ public sealed class AdoptOperation(
         QemuProcess? proc = null;
         try
         {
-            proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
+            proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
 
             Report("qga-wait", "Waiting for QGA agent…", 55);
             await using var qga = await QgaClient.ConnectAsync("127.0.0.1", qgaPort, clientCert, caCert, ct).ConfigureAwait(false);
@@ -262,7 +268,11 @@ public sealed class AdoptOperation(
                 s.ActiveOperation = null;
                 s.AdoptionJournal = null;
             });
-            return Fail(operationId, $"Adoption migration or health check failed: {ex.Message}. Archive retained untouched.", logPath);
+            log.Error("Adoption migration or health check failed", ex);
+            var code = ex.Message.StartsWith("Incorrect ERPNext Administrator password", StringComparison.Ordinal)
+                ? FailureCode.PasswordRejected
+                : FailureCode.DataUnusable;
+            return Fail(operationId, $"Adoption migration or health check failed: {ex.Message}. Archive retained untouched.", logPath, code);
         }
 
         // 10. Journaled promotion (KTD9)
@@ -505,6 +515,7 @@ public sealed class AdoptOperation(
         });
     }
 
-    private static OperationResult Fail(Guid id, string msg, string log) =>
-        new(id, OperationKind.Adopt, OperationOutcome.Failure, msg, log);
+    private static OperationResult Fail(Guid id, string msg, string log,
+        FailureCode code = FailureCode.Unknown) =>
+        new(id, OperationKind.Adopt, OperationOutcome.Failure, msg, log, code);
 }

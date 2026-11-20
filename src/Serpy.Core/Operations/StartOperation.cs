@@ -38,10 +38,15 @@ public sealed class StartOperation(
         var logPath = Path.Combine(KnownPaths.LogsDir, $"start-{operationId:N}.log");
         Directory.CreateDirectory(KnownPaths.LogsDir);
 
-        void Report(string stage, string msg, int? pct = null) =>
+        using var log = new OperationLog(logPath);
+
+        void Report(string stage, string msg, int? pct = null)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(
                 operationId, OperationKind.Start, stage,
                 UpdateSeverity.Info, msg, pct, null));
+        }
 
         var state = stateStore.Read();
 
@@ -127,7 +132,11 @@ public sealed class StartOperation(
 
         // Spawn.
         Report("spawn", "Starting QEMU…", 15);
-        var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
+        // The everyday ERPNext process outlives this operation, so its console output goes to its own
+        // file (an OperationLog is disposed when the operation ends) and it is not placed in a job.
+        var qemuLogPath = Path.ChangeExtension(logPath, ".qemu.log");
+        var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, qemuLogPath);
+        log.Info($"QEMU started, process id {proc.Pid}. Its console output is in {Path.GetFileName(qemuLogPath)}.");
 
         // Persist PID immediately after spawn.
         stateStore.Mutate(s =>
@@ -275,6 +284,7 @@ public sealed class StartOperation(
         return Fail(id, msg, log);
     }
 
-    private static OperationResult Fail(Guid id, string msg, string log) =>
-        new(id, OperationKind.Start, OperationOutcome.Failure, msg, log);
+    private static OperationResult Fail(Guid id, string msg, string log,
+        FailureCode code = FailureCode.Unknown) =>
+        new(id, OperationKind.Start, OperationOutcome.Failure, msg, log, code);
 }

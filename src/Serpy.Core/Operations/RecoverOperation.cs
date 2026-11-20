@@ -48,11 +48,16 @@ public sealed class RecoverOperation(
     {
         var logPath = Path.Combine(KnownPaths.LogsDir, $"recover-{operationId:N}.log");
         Directory.CreateDirectory(KnownPaths.LogsDir);
+        using var log = new OperationLog(logPath);
+        stateStore.Mutate(s => s.LogPath = logPath);
 
-        void Report(string stage, string msg, int? pct = null) =>
+        void Report(string stage, string msg, int? pct = null)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(
                 operationId, OperationKind.Recover, stage,
                 UpdateSeverity.Info, msg, pct, null));
+        }
 
         // 1. Validate replacement.
         Report("validate", "Validating replacement image…", 5);
@@ -240,7 +245,8 @@ public sealed class RecoverOperation(
             .QmpOnChardev("qmp0")
             .VirtioSerialDevice().QgaVirtioPort("qga0");
 
-        await using var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
+        await using var proc = QemuProcess.Start(
+            runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
         await using var _ = await SerialClient.ConnectAsync(
             "127.0.0.1", serialPort, clientCert, caCert, ct);
         await using var qga = await QgaClient.ConnectAsync(
@@ -429,6 +435,7 @@ public sealed class RecoverOperation(
         journalTargetsReplacement && !diskSwapped &&
         IsSwapInProgress(systemImageExists, backupImageExists);
 
-    private static OperationResult Fail(Guid id, string msg, string log) =>
-        new(id, OperationKind.Recover, OperationOutcome.Failure, msg, log);
+    private static OperationResult Fail(Guid id, string msg, string log,
+        FailureCode code = FailureCode.Unknown) =>
+        new(id, OperationKind.Recover, OperationOutcome.Failure, msg, log, code);
 }

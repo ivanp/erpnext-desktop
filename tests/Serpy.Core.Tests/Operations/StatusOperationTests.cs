@@ -43,4 +43,15 @@ public sealed class StatusOperationTests : IDisposable
         Assert.Equal(ReadinessState.Initialized, status.Readiness);
         Assert.Equal(LaunchRoute.Start, status.RecommendedRoute);
     }
+
+    [Fact]
+    public async Task GetStatus_ExposesTheLogPathOfTheLastOperation()
+    {
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s => s.LogPath = Path.Combine(_dir, "build-1.log"));
+
+        var status = await new StatusOperation(store).GetStatusAsync();
+
+        Assert.Equal(Path.Combine(_dir, "build-1.log"), status.LogPath);
+    }
 }

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
+using Serpy.Core.Guest;
 using Serpy.Core.Images;
 using Serpy.Core.Protocols;
 using Serpy.Core.Protocols.Qga;
@@ -38,7 +39,14 @@ public sealed class BuildOperation(
     VersionManifest manifest,
     ApplianceSettings settings)
 {
-    private const string ProvisionSentinel = "SERPY_PROVISION_DONE";
+    /// <summary>The guest must print its started marker within this time of the boot (KTD2).</summary>
+    public static readonly TimeSpan ProvisionStartWindow = TimeSpan.FromMinutes(5);
+
+    /// <summary>No console line for this long raises the quiet signal; the build keeps waiting.</summary>
+    public static readonly TimeSpan ProvisionQuietTime = TimeSpan.FromMinutes(10);
+
+    /// <summary>Longest the whole provisioning may take.</summary>
+    public static readonly TimeSpan ProvisionTimeout = TimeSpan.FromHours(2);
 
     private string StagingPath  => Path.Combine(KnownPaths.ApplianceDir, ".staging-system.qcow2");
     private string FinalPath    => Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
@@ -61,8 +69,14 @@ public sealed class BuildOperation(
         Directory.CreateDirectory(KnownPaths.LogsDir);
         var logPath = Path.Combine(KnownPaths.LogsDir, $"build-{operationId:N}.log");
 
-        void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info) =>
+        using var log = new OperationLog(logPath);
+        stateStore.Mutate(s => { s.LogPath = logPath; s.ActiveOperation = opKind; });
+
+        void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(operationId, opKind, stage, sev, msg, pct, null));
+        }
 
         try
         {
@@ -112,27 +126,33 @@ public sealed class BuildOperation(
                 .QmpOnChardev("qmp0")
                 .VirtioSerialDevice().QgaVirtioPort("qga0");
 
-            // 6. Boot
+            // 6. Boot. The process ends with Serpy, so no orphan can hold the staging disk (KTD4).
             Report("provision", "Booting provisioning VM…", 25);
-            await using var proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath);
+            await using var proc = QemuProcess.Start(
+                runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
 
-            // 7. Serial sentinel
-            Report("provision", "Waiting for cloud-init (30–60 min)…", 30);
+            // 7. Watch the guest console. The monitor fails fast on a failure line, a closed
+            //    console, a QEMU exit or a guest that never starts (KTD2).
+            Report("provision", "Starting the installation inside the virtual computer…", 30);
             await using var serial = await SerialClient.ConnectAsync(
                 "127.0.0.1", serialPort, clientCert, caCert, ct);
 
-            var sentinel = await serial.WaitForSentinelAsync(
-                ProvisionSentinel,
-                TimeSpan.FromHours(2),
-                new Progress<string>(line => progress.Report(
-                    new OperationUpdate(operationId, OperationKind.Build, "provision",
-                        UpdateSeverity.Info, line, null, line + "\n"))),
-                ct);
+            var monitor = new ProvisionMonitor(ProvisionStartWindow, ProvisionQuietTime, ProvisionTimeout);
+            monitor.LineReceived += line =>
+            {
+                log.Guest(line);
+                progress.Report(new OperationUpdate(operationId, opKind, "provision",
+                    UpdateSeverity.Info, line, null, line + "\n"));
+            };
+            monitor.StageChanged += stage => Report("provision", $"Installation step: {stage}", null);
+            monitor.Stuck += () => log.Info("No output from the guest for " + ProvisionQuietTime.TotalMinutes + " minutes; still waiting.");
 
-            if (!sentinel.Found)
+            var outcome = await monitor.WaitAsync(serial.ReadLines(ct), proc.Exited, ct);
+            if (outcome.Code == FailureCode.Cancelled) ct.ThrowIfCancellationRequested();
+            if (!outcome.Succeeded)
             {
                 await KillAndClean(proc, ct);
-                return Fail(operationId, opKind, "Cloud-init did not complete within 2 hours.", logPath);
+                return Fail(operationId, opKind, outcome.Message, logPath, outcome.Code);
             }
 
             // 8. QGA version gate (R9)
@@ -153,7 +173,7 @@ public sealed class BuildOperation(
                 RemoveStaging();
                 return Fail(operationId, opKind,
                     $"Version gate: component={ex.Component} installed={ex.Installed} " +
-                    $"locked={ex.Locked} floor={ex.Floor}", logPath);
+                    $"locked={ex.Locked} floor={ex.Floor}", logPath, FailureCode.ProvisioningFailed);
             }
 
             // 9. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
@@ -199,11 +219,13 @@ public sealed class BuildOperation(
         {
             RemoveStaging();
             return new OperationResult(operationId, opKind,
-                OperationOutcome.Cancelled, "Build cancelled.", logPath);
+                OperationOutcome.Cancelled, "Build cancelled.", logPath, FailureCode.Cancelled);
         }
         catch (Exception ex)
         {
-            return Fail(operationId, opKind, $"Build failed: {ex.Message}", logPath);
+            log.Error("Build failed", ex);
+            RemoveStaging();
+            return Fail(operationId, opKind, $"Build failed: {ex.Message}", logPath, ClassifyFailure(ex));
         }
     }
 
@@ -232,7 +254,6 @@ public sealed class BuildOperation(
             s.SerialPort = null;
             s.LoopbackUrl = null;
             s.ActiveOperation = null;
-            s.LogPath = null;
             s.RecoveryJournal = null;
         });
 
@@ -283,6 +304,15 @@ public sealed class BuildOperation(
         if (File.Exists(StagingPath)) File.Delete(StagingPath);
     }
 
-    private static OperationResult Fail(Guid id, OperationKind kind, string msg, string log) =>
-        new(id, kind, OperationOutcome.Failure, msg, log);
+    private static FailureCode ClassifyFailure(Exception ex) => ex switch
+    {
+        TimeoutException => FailureCode.GuestConsoleClosed,
+        HttpRequestException => FailureCode.NetworkUnavailable,
+        IOException io when io.HResult == unchecked((int)0x80070070) => FailureCode.DiskFull,
+        _ => FailureCode.Unknown,
+    };
+
+    private static OperationResult Fail(Guid id, OperationKind kind, string msg, string log,
+        FailureCode code = FailureCode.Unknown) =>
+        new(id, kind, OperationOutcome.Failure, msg, log, code);
 }

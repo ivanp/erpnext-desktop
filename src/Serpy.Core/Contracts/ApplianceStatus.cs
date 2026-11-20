@@ -45,7 +45,8 @@ public sealed record ApplianceStatus(
     int? ProgressPercent,
     bool HasCommittedDataOnDisk = false,
     bool ArchiveHasProvenanceRecord = false,
-    LaunchRoute RecommendedRoute = LaunchRoute.Start);
+    LaunchRoute RecommendedRoute = LaunchRoute.Start,
+    string? LogPath = null);
 
 public enum OperationKind
 {

@@ -23,4 +23,5 @@ public sealed record OperationResult(
     OperationKind Kind,
     OperationOutcome Outcome,
     string Message,
-    string? LogPath = null);
+    string? LogPath = null,
+    FailureCode Code = FailureCode.None);

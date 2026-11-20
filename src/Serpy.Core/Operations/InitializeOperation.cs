@@ -51,10 +51,17 @@ public sealed class InitializeOperation(
         Directory.CreateDirectory(KnownPaths.LogsDir);
         var logPath = Path.Combine(KnownPaths.LogsDir, $"init-{operationId:N}.log");
 
-        void Report(string stage, string msg, int? pct = null) =>
+        using var log = new OperationLog(logPath);
+        log.Redact(adminPassword);
+        stateStore.Mutate(s => s.LogPath = logPath);
+
+        void Report(string stage, string msg, int? pct = null)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(
                 operationId, OperationKind.Initialize, stage,
                 UpdateSeverity.Info, msg, pct, null));
+        }
 
         // Guard: refuse if already committed.
         if (File.Exists(DataMarkerPath) || File.Exists(FinalDataPath))
@@ -106,7 +113,7 @@ public sealed class InitializeOperation(
             // 3. Boot.
             Report("boot", "Booting VM for data initialization…", 15);
             await using var proc = QemuProcess.Start(
-                runtimeResolver.QemuSystemExe, args.Args, logPath);
+                runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
 
             // 4. QGA connection (via serial sentinel first).
             Report("qga", "Waiting for guest agent…", 20);
@@ -170,10 +177,11 @@ public sealed class InitializeOperation(
         {
             return new OperationResult(operationId, OperationKind.Initialize,
                 OperationOutcome.Cancelled,
-                "Initialization cancelled. Pending disk retained.", logPath);
+                "Initialization cancelled. Pending disk retained.", logPath, FailureCode.Cancelled);
         }
         catch (Exception ex)
         {
+            log.Error("Initialization failed", ex);
             return Fail(operationId, $"Initialization failed: {ex.Message}", logPath);
         }
     }
@@ -186,6 +194,7 @@ public sealed class InitializeOperation(
         return Fail(id, msg, log);
     }
 
-    private static OperationResult Fail(Guid id, string msg, string log) =>
-        new(id, OperationKind.Initialize, OperationOutcome.Failure, msg, log);
+    private static OperationResult Fail(Guid id, string msg, string log,
+        FailureCode code = FailureCode.Unknown) =>
+        new(id, OperationKind.Initialize, OperationOutcome.Failure, msg, log, code);
 }

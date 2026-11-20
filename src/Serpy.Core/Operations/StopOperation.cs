@@ -28,15 +28,23 @@ public sealed class StopOperation(
     {
         var logPath = Path.Combine(KnownPaths.LogsDir, $"stop-{operationId:N}.log");
 
-        void Report(string stage, string msg) =>
+        Directory.CreateDirectory(KnownPaths.LogsDir);
+        using var log = new OperationLog(logPath);
+        stateStore.Mutate(s => s.LogPath = logPath);
+
+        void Report(string stage, string msg)
+        {
+            log.Stage(stage, msg);
             progress.Report(new OperationUpdate(
                 operationId, OperationKind.Stop, stage,
                 UpdateSeverity.Info, msg, null, null));
+        }
 
         var state = stateStore.Read();
 
         if (state.QemuPid is not { } pid || state.QmpPort is not { } qmpPort)
         {
+            log.Info("No running QEMU process is recorded; nothing to stop.");
             stateStore.Mutate(s => s.Health = HealthState.Stopped);
             return new OperationResult(operationId, OperationKind.Stop,
                 OperationOutcome.Success, "No running QEMU process recorded.", logPath);
@@ -79,6 +87,7 @@ public sealed class StopOperation(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            log.Error("QMP shutdown failed", ex);
             Report("error", $"QMP error: {ex.Message}");
         }
         finally

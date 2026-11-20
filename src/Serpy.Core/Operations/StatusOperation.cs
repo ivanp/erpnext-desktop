@@ -68,7 +68,8 @@ public sealed class StatusOperation(StateStore stateStore)
             ProgressPercent:             null,
             HasCommittedDataOnDisk:      hasCommittedData,
             ArchiveHasProvenanceRecord:  archiveHasProvenance,
-            RecommendedRoute:            route);
+            RecommendedRoute:            route,
+            LogPath:                     state.LogPath);
         return Task.FromResult(status);
     }
 }
