@@ -52,8 +52,8 @@ The full input manifest `config/build-inputs.json` is generated reproducibly by 
 
 | Part ID | Title | File Count | Approx. Size | Source Hosts |
 |---|---|---|---|---|
-| `engine` | Serpy engine | 1 | 188 MB | `qemu.weilnetz.de` |
-| `os` | Operating system for ERPNext | 1 | 357 MB | `cloud.debian.org` |
+| `engine` | Serpy engine | 1 | 197 MB | `qemu.weilnetz.de` |
+| `os` | Operating system for ERPNext | 1 | 325 MB | `cloud.debian.org` |
 | `database` | Database | 12 | 27 MB | `archive.mariadb.org` |
 | `system-tools` | System tools | 224 | 155 MB | `deb.debian.org`, `snapshot.debian.org` |
 | `language-tools` | Language tools | 179 | 241 MB | `files.pythonhosted.org`, `nodejs.org`, `registry.yarnpkg.com`, `snapshot.debian.org` |

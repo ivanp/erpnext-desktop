@@ -409,7 +409,7 @@ engine_files = [
     {
         "key": "qemu-w64-setup-20260811.exe",
         "path": "",
-        "size": 188743680,
+        "size": 206615928,
         "sha256": "f98a8aeb5f7faea9765b6dee28316c266cd179d80354a2fed8e50176f9a2e59f",
         "sha512": None,
         "urls": ["https://qemu.weilnetz.de/w64/qemu-w64-setup-20260811.exe"],
@@ -421,7 +421,7 @@ os_files = [
     {
         "key": "debian-13-genericcloud-amd64-20260819-2575.qcow2",
         "path": "",
-        "size": 357564416,
+        "size": 341049344,
         "sha256": None,
         "sha512": "77429b411b39b43f914dc9d14bf34aa315489a1a12b5429f72e5b483bdda23c65698d33443c85d3f3ad7c3a0828ae60845406d6b99646342554d17abae29c2a3",
         "urls": ["https://cloud.debian.org/images/cloud/trixie/20260819-2575/debian-13-genericcloud-amd64-20260819-2575.qcow2"],
