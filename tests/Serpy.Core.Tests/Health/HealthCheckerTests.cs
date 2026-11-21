@@ -75,3 +75,140 @@ public sealed class HealthCredentialsTests : IDisposable
         Assert.Equal("replacement-password", creds.Retrieve()!.Value.AdminPassword);
     }
 }
+
+public sealed class HealthCheckerSignInTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyHealthSignIn-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir)) try { Directory.Delete(_dir, recursive: true); } catch { }
+    }
+
+    private sealed class FakeGuest(bool erpnextListed = true, bool scheduler = true) : Serpy.Core.Guest.IGuestHealthProbe
+    {
+        public Task<string> ListAppsAsync(string siteName, CancellationToken ct = default) =>
+            Task.FromResult(erpnextListed ? "frappe\nerpnext" : "frappe");
+
+        public Task<bool> IsSchedulerRunningAsync(string siteName, CancellationToken ct = default) =>
+            Task.FromResult(scheduler);
+    }
+
+    private sealed class FakeSite(System.Net.HttpStatusCode login) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            lock (Requests) Requests.Add($"{request.Method} {path}");
+
+            if (path == "/api/method/login")
+            {
+                var response = new HttpResponseMessage(login);
+                if (login == System.Net.HttpStatusCode.OK) response.Headers.Add("Set-Cookie", "sid=abc; Path=/");
+                return Task.FromResult(response);
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/resource/ToDo")
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":{\"name\":\"todo-1\"}}"),
+                });
+
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}"),
+            });
+        }
+    }
+
+    private HealthCredentials Saved(string password = "admin")
+    {
+        Directory.CreateDirectory(_dir);
+        var credentials = new HealthCredentials(Path.Combine(_dir, "cred"));
+        credentials.Store("site1.local", password);
+        return credentials;
+    }
+
+    private static HealthChecker Checker(FakeGuest guest, FakeSite site, HealthCredentials credentials) =>
+        new(guest, "site1.local", "http://127.0.0.1:18080", credentials, site);
+
+    [Fact]
+    public async Task ARejectedPassword_IsADistinctResult_NotAGenericAuthFailure()
+    {
+        var site = new FakeSite(System.Net.HttpStatusCode.Unauthorized);
+
+        var result = await Checker(new FakeGuest(), site, Saved("wrong")).RunAsync();
+
+        Assert.False(result.Healthy);
+        Assert.True(result.IsPasswordRejected);
+        Assert.Equal(HealthResult.PasswordCheck, result.FailedCheck);
+        Assert.DoesNotContain("wrong", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARejectedPassword_StopsBeforeAnyRecordIsCreated()
+    {
+        var site = new FakeSite(System.Net.HttpStatusCode.Unauthorized);
+
+        await Checker(new FakeGuest(), site, Saved()).RunAsync();
+
+        Assert.DoesNotContain(site.Requests, r => r.Contains("/api/resource", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.InternalServerError)]
+    [InlineData(System.Net.HttpStatusCode.BadGateway)]
+    [InlineData(System.Net.HttpStatusCode.ServiceUnavailable)]
+    public async Task ASiteThatIsNotReady_IsNotReportedAsARejectedPassword(System.Net.HttpStatusCode status)
+    {
+        var site = new FakeSite(status);
+
+        var result = await Checker(new FakeGuest(), site, Saved()).RunAsync();
+
+        Assert.False(result.Healthy);
+        Assert.False(result.IsPasswordRejected);
+        Assert.Equal("auth", result.FailedCheck);
+    }
+
+    [Fact]
+    public async Task ACorrectPassword_RunsTheCreateReadDeleteCheck_AndIsHealthy()
+    {
+        var site = new FakeSite(System.Net.HttpStatusCode.OK);
+
+        var result = await Checker(new FakeGuest(), site, Saved()).RunAsync();
+
+        Assert.True(result.Healthy);
+        Assert.False(result.IsPasswordRejected);
+        Assert.Contains("POST /api/resource/ToDo", site.Requests);
+        Assert.Contains("DELETE /api/resource/ToDo/todo-1", site.Requests);
+    }
+
+    [Fact]
+    public async Task ChecksThatNeedNoSignIn_ComeFirst_SoARejectedPasswordMeansTheRestPassed()
+    {
+        var site = new FakeSite(System.Net.HttpStatusCode.Unauthorized);
+
+        var noApp = await Checker(new FakeGuest(erpnextListed: false), site, Saved()).RunAsync();
+        var noScheduler = await Checker(new FakeGuest(scheduler: false), site, Saved()).RunAsync();
+
+        Assert.Equal("apps", noApp.FailedCheck);
+        Assert.Equal("scheduler", noScheduler.FailedCheck);
+        Assert.DoesNotContain(site.Requests, r => r.Contains("login", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WithNoSavedCredential_TheResultIsNotARejectedPassword()
+    {
+        Directory.CreateDirectory(_dir);
+        var empty = new HealthCredentials(Path.Combine(_dir, "none"));
+        var site = new FakeSite(System.Net.HttpStatusCode.OK);
+
+        var result = await Checker(new FakeGuest(), site, empty).RunAsync();
+
+        Assert.False(result.Healthy);
+        Assert.False(result.IsPasswordRejected);
+        Assert.Equal("auth", result.FailedCheck);
+    }
+}

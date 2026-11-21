@@ -7,7 +7,14 @@ namespace Serpy.Core.Guest;
 /// All in-guest operations flow through this class — no ad-hoc exec strings elsewhere.
 /// Credentials are never passed as command-line arguments; use stdin (InputData) instead.
 /// </summary>
-public sealed class GuestOperations(QgaClient qga)
+/// <summary>The two guest checks that the health check makes. A seam, so its tests need no guest.</summary>
+public interface IGuestHealthProbe
+{
+    Task<string> ListAppsAsync(string siteName, CancellationToken ct = default);
+    Task<bool> IsSchedulerRunningAsync(string siteName, CancellationToken ct = default);
+}
+
+public sealed class GuestOperations(QgaClient qga) : IGuestHealthProbe
 {
     // ── Version queries ───────────────────────────────────────────────────────
 

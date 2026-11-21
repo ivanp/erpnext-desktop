@@ -16,10 +16,11 @@ namespace Serpy.Core.Health;
 ///   4. Create → read → delete a disposable ToDo record through the app layer
 /// </summary>
 public sealed class HealthChecker(
-    GuestOperations guest,
+    IGuestHealthProbe guest,
     string siteName,
     string loopbackUrl,
-    HealthCredentials credentials)
+    HealthCredentials credentials,
+    HttpMessageHandler? httpHandler = null)
 {
     public async Task<HealthResult> RunAsync(CancellationToken ct = default)
     {
@@ -54,7 +55,11 @@ public sealed class HealthChecker(
 
         try
         {
-            var cookie = await GetSessionCookieAsync(cred.Value.AdminPassword, ct);
+            var login = await SignInAsync(cred.Value.AdminPassword, ct);
+            if (login.Rejected)
+                return HealthResult.PasswordRejected(
+                    "ERPNext rejected the saved Administrator password.");
+            var cookie = login.Cookie;
             if (cookie is null)
                 return HealthResult.Fail("Authentication failed — check admin credential", "auth");
 
@@ -77,9 +82,12 @@ public sealed class HealthChecker(
 
     // ── REST helpers ──────────────────────────────────────────────────────────
 
-    private async Task<string?> GetSessionCookieAsync(string password, CancellationToken ct)
+    // Frappe answers a wrong password with 401, and a login that needs a second step with 403 or 417.
+    // Only a 401 is a rejected password. Any other failure (a 5xx, a refused connection) says the
+    // site is not ready, which is a different problem with a different remedy.
+    private async Task<(string? Cookie, bool Rejected)> SignInAsync(string password, CancellationToken ct)
     {
-        using var http = new HttpClient { BaseAddress = new Uri(loopbackUrl) };
+        using var http = NewClient();
         var body = new StringContent(
             JsonSerializer.Serialize(
                 new LoginRequest { Usr = "Administrator", Pwd = password },
@@ -87,11 +95,13 @@ public sealed class HealthChecker(
             Encoding.UTF8, "application/json");
 
         var resp = await http.PostAsync("/api/method/login", body, ct);
-        if (!resp.IsSuccessStatusCode) return null;
+        if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized) return (null, true);
+        if (!resp.IsSuccessStatusCode) return (null, false);
 
-        return resp.Headers.TryGetValues("Set-Cookie", out var cookies)
+        var cookie = resp.Headers.TryGetValues("Set-Cookie", out var cookies)
             ? string.Join("; ", cookies)
             : null;
+        return (cookie, false);
     }
 
     private async Task<string?> CreateProbeRecordAsync(string cookie, CancellationToken ct)
@@ -124,9 +134,13 @@ public sealed class HealthChecker(
         await http.DeleteAsync($"/api/resource/ToDo/{Uri.EscapeDataString(name)}", ct);
     }
 
+    private HttpClient NewClient() => httpHandler is null
+        ? new HttpClient { BaseAddress = new Uri(loopbackUrl) }
+        : new HttpClient(httpHandler, disposeHandler: false) { BaseAddress = new Uri(loopbackUrl) };
+
     private HttpClient MakeClient(string cookie)
     {
-        var http = new HttpClient { BaseAddress = new Uri(loopbackUrl) };
+        var http = NewClient();
         http.DefaultRequestHeaders.Add("Cookie", cookie);
         http.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
@@ -136,6 +150,17 @@ public sealed class HealthChecker(
 
 public sealed record HealthResult(bool Healthy, string? FailedCheck, string? Reason)
 {
+    /// <summary>The check that reports a rejected sign-in (KTD12). It is not a generic failure.</summary>
+    public const string PasswordCheck = "password";
+
     public static HealthResult Ok() => new(true, null, null);
     public static HealthResult Fail(string reason, string check) => new(false, check, reason);
+
+    /// <summary>
+    /// Everything that needs no sign-in passed and ERPNext refused the password. The site is up, so
+    /// start can leave it running and ask for the password, in place of stopping it (KTD12).
+    /// </summary>
+    public static HealthResult PasswordRejected(string reason) => new(false, PasswordCheck, reason);
+
+    public bool IsPasswordRejected => !Healthy && FailedCheck == PasswordCheck;
 }
