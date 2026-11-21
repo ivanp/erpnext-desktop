@@ -277,10 +277,11 @@ public sealed class BuildOperation(
 
         return new GuestVersionReport
         {
-            Python  = await Run("python3.14", ["--version"]),
-            Node    = await Run("node", ["--version"]),
-            MariaDb = await Run("mariadb", ["--version"]),
-            Redis   = await Run("redis-server", ["--version"]),
+            // The tools print banners. The gate and the replacement check compare bare versions.
+            Python  = GuestVersionParser.Python(await Run("python3.14", ["--version"])),
+            Node    = GuestVersionParser.Node(await Run("node", ["--version"])),
+            MariaDb = GuestVersionParser.MariaDb(await Run("mariadb", ["--version"])),
+            Redis   = GuestVersionParser.Redis(await Run("redis-server", ["--version"])),
             Frappe  = apps.Frappe,
             ErpNext = apps.ErpNext,
         };
