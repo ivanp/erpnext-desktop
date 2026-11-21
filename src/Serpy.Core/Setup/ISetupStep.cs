@@ -27,6 +27,12 @@ public interface ISetupStep
 
     /// <summary>Deletes what an interrupted run of this step left behind (KTD10).</summary>
     void DeleteLeftovers(SetupContext context);
+
+    /// <summary>
+    /// Evaluates step-specific prerequisites or route decisions before any step runs (KTD11).
+    /// Returns null on success, or a failed result to stop setup immediately.
+    /// </summary>
+    SetupStepResult? Preflight(SetupContext context) => null;
 }
 
 public sealed record SetupStepResult(

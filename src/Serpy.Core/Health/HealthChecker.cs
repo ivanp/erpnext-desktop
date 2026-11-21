@@ -49,16 +49,26 @@ public sealed class HealthChecker(
 
         // 3 + 4. Authenticated REST + CRUD
         var cred = credentials.Retrieve();
-        if (cred is null)
-            return HealthResult.Fail(
-                "No admin credential stored — cannot perform authenticated health check", "auth");
+        bool fallbackAdmin = false;
+        string password;
+        if (cred is not null)
+        {
+            password = cred.Value.AdminPassword;
+        }
+        else
+        {
+            fallbackAdmin = true;
+            password = "admin";
+        }
 
         try
         {
-            var login = await SignInAsync(cred.Value.AdminPassword, ct);
+            var login = await SignInAsync(password, ct);
             if (login.Rejected)
                 return HealthResult.PasswordRejected(
-                    "ERPNext rejected the saved Administrator password.");
+                    fallbackAdmin
+                        ? "ERPNext rejected the Administrator password."
+                        : "ERPNext rejected the saved Administrator password.");
             var cookie = login.Cookie;
             if (cookie is null)
                 return HealthResult.Fail("Authentication failed — check admin credential", "auth");
@@ -71,6 +81,11 @@ public sealed class HealthChecker(
                 return HealthResult.Fail($"Could not read probe record {docName}", "crud-read");
 
             await DeleteProbeRecordAsync(cookie, docName, ct);
+
+            if (fallbackAdmin)
+            {
+                credentials.Store(siteName, "admin");
+            }
         }
         catch (Exception ex)
         {
@@ -79,6 +94,15 @@ public sealed class HealthChecker(
 
         return HealthResult.Ok();
     }
+    /// <summary>
+    /// Verifies candidate password credentials against Frappe's login method without persisting (KTD12).
+    /// </summary>
+    public async Task<(bool Valid, bool Rejected)> CheckPasswordAsync(string password, CancellationToken ct = default)
+    {
+        var login = await SignInAsync(password, ct);
+        return (login.Cookie is not null, login.Rejected);
+    }
+
 
     // ── REST helpers ──────────────────────────────────────────────────────────
 

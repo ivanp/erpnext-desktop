@@ -62,10 +62,14 @@ public sealed class StatusOperation(
             ? LaunchRoute.Start
             : LaunchRoute.Setup;
 
+        var setupSummary = ReadSetupSummary();
+        bool passwordRejected = (health == HealthState.RunningUnhealthy && state.HealthFailureReason == "password needed") ||
+            (setupSummary?.LastFailure == FailureCode.PasswordRejected);
+
         var status = new ApplianceStatus(
             Readiness:                   state.Readiness,
             Health:                      health,
-            LoopbackUrl:                 health == HealthState.Running ? state.LoopbackUrl : null,
+            LoopbackUrl:                 (health is HealthState.Running or HealthState.RunningUnhealthy) ? state.LoopbackUrl : null,
             CurrentStage:                null,
             ActiveOperation:             activeOp,
             ProgressPercent:             null,
@@ -73,7 +77,9 @@ public sealed class StatusOperation(
             ArchiveHasProvenanceRecord:  archiveHasProvenance,
             RecommendedRoute:            route,
             LogPath:                     state.LogPath,
-            Setup:                       ReadSetupSummary());
+            Setup:                       setupSummary,
+            PasswordRejected:            passwordRejected,
+            HealthFailureReason:         state.HealthFailureReason);
         return Task.FromResult(status);
     }
 

@@ -47,7 +47,9 @@ public sealed record ApplianceStatus(
     bool ArchiveHasProvenanceRecord = false,
     LaunchRoute RecommendedRoute = LaunchRoute.Start,
     string? LogPath = null,
-    SetupSummary? Setup = null);
+    SetupSummary? Setup = null,
+    bool PasswordRejected = false,
+    string? HealthFailureReason = null);
 
 public enum OperationKind
 {
@@ -61,4 +63,5 @@ public enum OperationKind
     InspectArchive,
     Adopt,
     Reset,
+    VerifyPassword,
 }

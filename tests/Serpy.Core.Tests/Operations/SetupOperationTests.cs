@@ -55,9 +55,11 @@ public sealed class SetupOperationTests : IDisposable
         public bool Done;
         public int Runs;
         public int LeftoverDeletes;
+        public Func<SetupContext, SetupStepResult?>? PreflightWork;
         public Func<SetupContext, CancellationToken, Task<SetupStepResult>> Work =
             (_, _) => Task.FromResult(SetupStepResult.Success());
 
+        public SetupStepResult? Preflight(SetupContext context) => PreflightWork?.Invoke(context);
         public bool IsDone(SetupContext context) => Done;
 
         public async Task<SetupStepResult> RunAsync(SetupContext context, CancellationToken ct)
@@ -416,6 +418,24 @@ public sealed class SetupOperationTests : IDisposable
         release.SetResult();
         await run;
         Assert.False(op.IsWorking);
+    }
+
+    [Fact]
+    public async Task APreflightFailure_HaltsBeforeRunningAnySteps_AndRecordsFailure()
+    {
+        var steps = AllSteps();
+        steps[1].PreflightWork = _ => SetupStepResult.Failed(FailureCode.DataUnusable, "Data unusable at preflight");
+
+        var setup = NewSetupStore();
+        var updates = new Collector();
+        var result = await MakeOp(steps, setupStore: setup).RunAsync(new SetupRequest(), updates, CancellationToken.None);
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Equal(FailureCode.DataUnusable, result.Code);
+        Assert.Equal(SetupStepId.CompanyData, result.FailedStep);
+        Assert.Equal(0, steps[0].Runs);
+        Assert.Equal(0, steps[1].Runs);
+        Assert.Equal(0, steps[2].Runs);
     }
 
     private static async Task WaitFor(Func<bool> condition)

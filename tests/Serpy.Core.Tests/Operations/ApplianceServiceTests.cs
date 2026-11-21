@@ -296,3 +296,155 @@ public sealed class ApplianceServiceBuildReadinessTests
         Assert.False(ApplianceService.CanBuildPreservingDataFrom(state, committedDataExists: false));
     }
 }
+
+public sealed class ApplianceServiceVerifyPasswordTests : IDisposable
+{
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyVerifyPwdTest-{Guid.NewGuid():N}");
+
+    public ApplianceServiceVerifyPasswordTests() =>
+        Environment.SetEnvironmentVariable(OverrideVariable, Path.Combine(_dir, "appdata"));
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
+        if (Directory.Exists(_dir)) try { Directory.Delete(_dir, recursive: true); } catch { }
+    }
+
+    private sealed class FakeGuestProbe : Serpy.Core.Guest.IGuestHealthProbe
+    {
+        public Task<string> ListAppsAsync(string site, CancellationToken ct) => Task.FromResult("erpnext 16.0.0\nfrappe 16.0.0");
+        public Task<bool> IsSchedulerRunningAsync(string site, CancellationToken ct) => Task.FromResult(true);
+    }
+
+    private sealed class FakeSiteHandler(System.Net.HttpStatusCode loginStatus) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            var path = req.RequestUri?.AbsolutePath ?? "";
+            if (path.Contains("/api/method/login"))
+            {
+                var resp = new HttpResponseMessage(loginStatus);
+                if (loginStatus == System.Net.HttpStatusCode.OK)
+                    resp.Headers.Add("Set-Cookie", "sid=123; Path=/");
+                return Task.FromResult(resp);
+            }
+            if (path.Contains("/api/resource/ToDo"))
+            {
+                var resp = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":{\"name\":\"todo-1\"}}", System.Text.Encoding.UTF8, "application/json"),
+                };
+                return Task.FromResult(resp);
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        }
+    }
+
+    [Fact]
+    public async Task VerifyPassword_AcceptedPassword_SavesCredential_AndSetsHealthRunning()
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.RunningUnhealthy;
+            s.HealthFailureReason = "password needed";
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+            s.QgaPort = 18001;
+        });
+
+        var creds = new HealthCredentials(Path.Combine(_dir, "health-cred"));
+        var site = new FakeSiteHandler(System.Net.HttpStatusCode.OK);
+
+        var service = new ApplianceService(
+            runtimeResolver: null!,
+            certStore: new TlsCertificateStore(Path.Combine(_dir, "certs")),
+            imageTool: null!,
+            imageDownloader: null!,
+            seedWriter: null!,
+            healthCredentials: creds,
+            stateStore: store,
+            manifest: new VersionManifest(),
+            settings: new ApplianceSettings(),
+            healthCheckerFactory: (siteName, url, c) =>
+                new Serpy.Core.Health.HealthChecker(new FakeGuestProbe(), siteName, url, c, site));
+
+        var result = await service.VerifyPasswordAsync("newSecretPassword");
+
+        Assert.Equal(OperationOutcome.Success, result.Outcome);
+        Assert.Equal("newSecretPassword", creds.Retrieve()?.AdminPassword);
+        Assert.Equal(HealthState.Running, store.Read().Health);
+        Assert.Null(store.Read().HealthFailureReason);
+    }
+
+    [Fact]
+    public async Task VerifyPassword_RejectedPassword_ReturnsPasswordRejected_AndDoesNotSave()
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.RunningUnhealthy;
+            s.HealthFailureReason = "password needed";
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+            s.QgaPort = 18001;
+        });
+
+        var creds = new HealthCredentials(Path.Combine(_dir, "health-cred"));
+        var site = new FakeSiteHandler(System.Net.HttpStatusCode.Unauthorized);
+
+        var service = new ApplianceService(
+            runtimeResolver: null!,
+            certStore: new TlsCertificateStore(Path.Combine(_dir, "certs")),
+            imageTool: null!,
+            imageDownloader: null!,
+            seedWriter: null!,
+            healthCredentials: creds,
+            stateStore: store,
+            manifest: new VersionManifest(),
+            settings: new ApplianceSettings(),
+            healthCheckerFactory: (siteName, url, c) =>
+                new Serpy.Core.Health.HealthChecker(new FakeGuestProbe(), siteName, url, c, site));
+
+        var result = await service.VerifyPasswordAsync("wrongPassword");
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Equal(FailureCode.PasswordRejected, result.Code);
+        Assert.Null(creds.Retrieve());
+        Assert.Equal(HealthState.RunningUnhealthy, store.Read().Health);
+        Assert.Equal("password needed", store.Read().HealthFailureReason);
+    }
+
+    [Fact]
+    public async Task VerifyPassword_WhenApplianceStopped_ReturnsFailure()
+    {
+        Directory.CreateDirectory(_dir);
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.Stopped;
+        });
+
+        var creds = new HealthCredentials(Path.Combine(_dir, "health-cred"));
+        var service = new ApplianceService(
+            runtimeResolver: null!,
+            certStore: new TlsCertificateStore(Path.Combine(_dir, "certs")),
+            imageTool: null!,
+            imageDownloader: null!,
+            seedWriter: null!,
+            healthCredentials: creds,
+            stateStore: store,
+            manifest: new VersionManifest(),
+            settings: new ApplianceSettings());
+
+        var result = await service.VerifyPasswordAsync("any");
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Contains("not running", result.Message);
+    }
+}

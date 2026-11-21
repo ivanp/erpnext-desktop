@@ -29,7 +29,10 @@ public sealed class ApplianceService : IApplianceService, IDisposable
     private readonly AdoptOperation _adoptOp;
     private readonly ResetOperation _resetOp;
     private readonly SetupOperation _setupOp;
-
+    private readonly HealthCredentials _healthCredentials;
+    private readonly TlsCertificateStore _certStore;
+    private readonly ApplianceSettings _settings;
+    private readonly Func<string, string, HealthCredentials, Health.HealthChecker>? _healthCheckerFactory;
     public ApplianceService(
         ManagedRuntimeResolver runtimeResolver,
         TlsCertificateStore certStore,
@@ -41,9 +44,14 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         VersionManifest manifest,
         ApplianceSettings settings,
         IPowerRequest? powerRequest = null,
-        IPcProbe? pcProbe = null)
+        IPcProbe? pcProbe = null,
+        Func<string, string, HealthCredentials, Health.HealthChecker>? healthCheckerFactory = null)
     {
         _stateStore = stateStore;
+        _healthCredentials = healthCredentials;
+        _certStore = certStore;
+        _settings = settings;
+        _healthCheckerFactory = healthCheckerFactory;
         _lock      = new LifecycleLock();
         var setupStore = new SetupStateStore();
         _statusOp  = new StatusOperation(stateStore, setupStore, () => _setupOp?.IsWorking ?? false);
@@ -74,11 +82,14 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             steps.Add(new PcCheckStep(
                 pcProbe,
                 () => KnownPaths.ApplianceDir,
-                () => DownloadHosts.StillNeeded(manifest, KnownPaths.ApplianceDir)));
+                () => DownloadHosts.StillNeeded(manifest, KnownPaths.ApplianceDir),
+                extraDiskBytes: () => CompanyDataStep.GetExtraDiskBytes(
+                    KnownPaths.ApplianceDir, setupStore, stateStore)));
         }
 
         steps.Add(new BuildStep(_buildOp, stateStore));
-        steps.Add(new CompanyDataStep(_initOp, stateStore));
+        steps.Add(new CompanyDataStep(
+            _initOp, stateStore, _adoptOp, _inspectArchiveOp, setupStore, healthCredentials));
         steps.Add(new StartStep(_startOp, stateStore));
         _setupOp   = new SetupOperation(
             steps,
@@ -228,6 +239,92 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         using (lease)
             return await _resetOp.ExecuteAsync(Guid.NewGuid(), progress, ct);
     }
+    public async Task<OperationResult> VerifyPasswordAsync(
+        string password,
+        CancellationToken ct = default)
+    {
+        var lease = _lock.TryAcquire(TimeSpan.Zero);
+        if (lease is null) return Busy(OperationKind.VerifyPassword);
+        using (lease)
+        {
+            var state = _stateStore.Read();
+            if (state.Health is not (HealthState.Running or HealthState.RunningUnhealthy) ||
+                string.IsNullOrEmpty(state.LoopbackUrl))
+            {
+                return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Failure,
+                    "Appliance is not running.", null, FailureCode.Unknown);
+            }
+
+            if (!_certStore.IsInitialized()) _certStore.GenerateCertificates();
+            using var clientCert = _certStore.LoadClientCert();
+            using var caCert = _certStore.LoadCaCert();
+
+            var cred = _healthCredentials.Retrieve();
+            var siteName = cred?.SiteName ?? "site1.local";
+
+            try
+            {
+                if (_healthCheckerFactory is not null)
+                {
+                    var checker = _healthCheckerFactory(siteName, state.LoopbackUrl, _healthCredentials);
+                    return await VerifyPasswordWithCheckerAsync(checker, siteName, password, ct);
+                }
+
+                if (state.QgaPort is null)
+                {
+                    return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Failure,
+                        "Guest agent port not found.", null, FailureCode.Unknown);
+                }
+
+                var qga = await Protocols.Qga.QgaClient.ConnectAsync(
+                    "127.0.0.1", state.QgaPort.Value, clientCert, caCert, ct);
+                await using (qga)
+                {
+                    var guestOps = new Guest.GuestOperations(qga);
+                    var checker = new Health.HealthChecker(
+                        guestOps, siteName, state.LoopbackUrl, _healthCredentials);
+                    return await VerifyPasswordWithCheckerAsync(checker, siteName, password, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Failure,
+                    $"Verification failed: {ex.Message}", null, FailureCode.Unknown);
+            }
+        }
+    }
+
+    private async Task<OperationResult> VerifyPasswordWithCheckerAsync(
+        Health.HealthChecker checker, string siteName, string password, CancellationToken ct)
+    {
+        var (valid, rejected) = await checker.CheckPasswordAsync(password, ct);
+        if (rejected || !valid)
+        {
+            return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Failure,
+                "ERPNext rejected the Administrator password.", null, FailureCode.PasswordRejected);
+        }
+
+        _healthCredentials.Store(siteName, password);
+
+        var health = await checker.RunAsync(ct);
+        if (!health.Healthy)
+        {
+            return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Failure,
+                $"Health check failed after password save: {health.Reason}", null,
+                health.IsPasswordRejected ? FailureCode.PasswordRejected : FailureCode.Unknown);
+        }
+
+        _stateStore.Mutate(s =>
+        {
+            s.Health = HealthState.Running;
+            s.HealthFailureReason = null;
+            s.ActiveOperation = null;
+        });
+
+        return new OperationResult(Guid.NewGuid(), OperationKind.VerifyPassword, OperationOutcome.Success,
+            "Password verified and saved.");
+    }
+
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

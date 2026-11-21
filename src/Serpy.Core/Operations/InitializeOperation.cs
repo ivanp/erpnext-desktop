@@ -37,8 +37,9 @@ public sealed class InitializeOperation(
 
     private string SystemImagePath => Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
     private string FinalDataPath   => Path.Combine(KnownPaths.ApplianceDir, "data.img");
-    private string PendingDataPath => Path.Combine(KnownPaths.ApplianceDir, ".pending-data.img");
-    private string DataMarkerPath  => Path.Combine(KnownPaths.ApplianceDir, ".data-committed");
+    private string PendingDataPath   => Path.Combine(KnownPaths.ApplianceDir, ".pending-data.img");
+    private string PendingSystemPath => Path.Combine(KnownPaths.ApplianceDir, ".pending-system.qcow2");
+    private string DataMarkerPath    => Path.Combine(KnownPaths.ApplianceDir, ".data-committed");
 
     public async Task<OperationResult> ExecuteAsync(
         Guid operationId,
@@ -77,6 +78,13 @@ public sealed class InitializeOperation(
 
         try
         {
+            // Keep the accepted image untouched until init-data, the health gate and clean
+            // shutdown all pass. The helper writes fstab/nginx/systemd configuration as well as
+            // data mounts, so a successful run commits this overlay into system.qcow2; a failed
+            // run can discard it and retry from the still-accepted image.
+            if (File.Exists(PendingSystemPath)) File.Delete(PendingSystemPath);
+            await imageTool.CreateCopyAsync(SystemImagePath, PendingSystemPath, ct);
+
             // 1. Create pending data disk.
             Report("disk", $"Creating {DataDiskGb} GiB sparse data disk…", 5);
             if (File.Exists(PendingDataPath)) File.Delete(PendingDataPath);
@@ -97,7 +105,7 @@ public sealed class InitializeOperation(
                 .Machine().Accelerator(accel).Cpu(accel)
                 .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
                 .FirmwareDir(runtimeResolver.ShareDir)
-                .SystemDisk(SystemImagePath)
+                .SystemDisk(PendingSystemPath)
                 .DataDisk(PendingDataPath, accel)
                 .UserNetWithPortForward(settings.ErpNextPort)
                 .TlsCredsX509("tls-serial", certStore.QemuCertDir)
@@ -164,7 +172,13 @@ public sealed class InitializeOperation(
                 return await AbortAndRetainAsync(proc, operationId,
                     "QEMU did not exit after graceful shutdown; pending data disk retained.", logPath, ct);
 
-            // 8. Atomic commit.
+            // 8. Publish the controlled system changes and the persistent data atomically from the
+            // lifecycle's point of view. The overlay's backing image remains the accepted image
+            // until this commit has completed.
+            Report("image", "Saving the system settings…", 98);
+            await imageTool.CommitAsync(PendingSystemPath, ct);
+            File.Delete(PendingSystemPath);
+            SystemImageManifest.RefreshAcceptedDigest(SystemImagePath);
             File.Move(PendingDataPath, FinalDataPath);
             File.WriteAllText(DataMarkerPath, $"committed:{DateTimeOffset.UtcNow:O}");
             stateStore.Mutate(s =>

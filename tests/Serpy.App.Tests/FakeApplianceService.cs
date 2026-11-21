@@ -83,6 +83,17 @@ public sealed class FakeApplianceService : IApplianceService
     public void TryAgainStep() => TryAgainCalls++;
 
     public string ComposeSetupDetails() => "details";
+    public Func<string, OperationResult>? CustomVerifyPasswordResult { get; set; }
+    public List<string> VerifiedPasswords { get; } = [];
+
+    public Task<OperationResult> VerifyPasswordAsync(string password, CancellationToken ct = default)
+    {
+        CalledOperations.Add(OperationKind.VerifyPassword);
+        VerifiedPasswords.Add(password);
+        var result = CustomVerifyPasswordResult?.Invoke(password) ?? Ok(OperationKind.VerifyPassword);
+        return Task.FromResult(result);
+    }
+
 
     public Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default)
         => Task.FromResult(Status);

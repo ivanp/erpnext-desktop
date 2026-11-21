@@ -71,6 +71,28 @@ public sealed class StartOperationGuardTests : IDisposable
         var result = new StartGuardDouble(store).Check();
         Assert.Null(result);
     }
+    [Fact]
+    public void RunningUnhealthy_PasswordNeeded_ReportsPasswordRejected_AndKeepsAddress()
+    {
+        var store = MakeStore(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.RunningUnhealthy;
+            s.HealthFailureReason = "password needed";
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+            s.QemuPid = 12345;
+        });
+
+        var guard = new StartGuardDouble(store);
+        var result = guard.Check(isProcessAlive: true);
+
+        Assert.NotNull(result);
+        Assert.Equal(OperationOutcome.Failure, result!.Outcome);
+        Assert.Equal(FailureCode.PasswordRejected, result.Code);
+        Assert.Contains("password needed", result.Message);
+        Assert.Equal("http://127.0.0.1:18080", store.Read().LoopbackUrl);
+    }
+
 }
 
 public sealed class StartHealthGateTests
@@ -104,6 +126,20 @@ public sealed class StartHealthGateTests
         Assert.False(result.Healthy);
         Assert.Equal("scheduler", result.FailedCheck);
     }
+    [Fact]
+    public async Task WaitForHealthyAsync_PasswordRejected_ReturnsPasswordRejectedResult()
+    {
+        var result = await StartOperation.WaitForHealthyAsync(
+            _ => Task.FromResult(Serpy.Core.Health.HealthResult.PasswordRejected("ERPNext rejected the saved Administrator password.")),
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            CancellationToken.None);
+
+        Assert.False(result.Healthy);
+        Assert.True(result.IsPasswordRejected);
+        Assert.Equal(Serpy.Core.Health.HealthResult.PasswordCheck, result.FailedCheck);
+    }
+
 }
 
 public sealed class StartCancellationTests : IDisposable
@@ -148,9 +184,24 @@ public sealed class StartCancellationTests : IDisposable
 
 internal sealed class StartGuardDouble(StateStore stateStore)
 {
-    public OperationResult? Check()
+    public OperationResult? Check(bool isProcessAlive = true)
     {
         var state = stateStore.Read();
+        if (state.QemuPid.HasValue && isProcessAlive)
+        {
+            if (state.Health == HealthState.Running)
+            {
+                return new OperationResult(Guid.Empty, OperationKind.Start, OperationOutcome.Success,
+                    $"Appliance already running at {state.LoopbackUrl}");
+            }
+
+            if (state.Health == HealthState.RunningUnhealthy && state.HealthFailureReason == "password needed")
+            {
+                return new OperationResult(Guid.Empty, OperationKind.Start, OperationOutcome.Failure,
+                    "ERPNext rejected the Administrator password: password needed", null, FailureCode.PasswordRejected);
+            }
+        }
+
         if (state.RecoveryJournal is { HealthPassed: false })
             return new OperationResult(Guid.Empty, OperationKind.Start, OperationOutcome.Failure,
                 "A recovery operation was interrupted before the health gate. " +

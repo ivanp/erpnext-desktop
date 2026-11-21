@@ -38,6 +38,42 @@ public sealed class SystemImageManifest
     }
 
     /// <summary>
+    /// Re-attests an image after a successful host-controlled initialization or recovery changed
+    /// its system configuration. The write is atomic, so a crash leaves either the old manifest or
+    /// the complete new one; it never leaves a half JSON document.
+    /// </summary>
+    public void RefreshAndWrite(string imagePath)
+    {
+        ImageSha256 = ComputeSha256(imagePath);
+        var directory = Path.GetDirectoryName(imagePath)
+            ?? throw new InvalidOperationException($"System image has no parent directory: {imagePath}");
+        var manifestPath = Path.Combine(directory, FileName);
+        var temporaryPath = manifestPath + ".tmp";
+        File.WriteAllText(temporaryPath,
+            JsonSerializer.Serialize(this, ApplianceStateJsonContext.Default.SystemImageManifest));
+        File.Move(temporaryPath, manifestPath, overwrite: true);
+    }
+
+    private static string ComputeSha256(string imagePath)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var stream = File.OpenRead(imagePath);
+        return Convert.ToHexString(sha.ComputeHash(stream));
+    }
+
+    /// <summary>Loads the existing acceptance record and refreshes it after a controlled image update.</summary>
+    public static void RefreshAcceptedDigest(string imagePath)
+    {
+        var directory = Path.GetDirectoryName(imagePath)
+            ?? throw new InvalidOperationException($"System image has no parent directory: {imagePath}");
+        var manifestPath = Path.Combine(directory, FileName);
+        var manifest = JsonSerializer.Deserialize(
+            File.ReadAllText(manifestPath), ApplianceStateJsonContext.Default.SystemImageManifest)
+            ?? throw new InvalidOperationException($"Acceptance manifest is empty: {manifestPath}");
+        manifest.RefreshAndWrite(imagePath);
+    }
+
+    /// <summary>
     /// Checks the adjacent acceptance manifest and its digest before a lifecycle
     /// operation consumes a system image.
     /// </summary>

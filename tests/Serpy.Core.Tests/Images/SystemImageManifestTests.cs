@@ -33,19 +33,61 @@ public sealed class SystemImageManifestTests : IDisposable
     }
 
     [Fact]
-    public void MatchesImageDigest_RejectsSidecarCopiedBesideDifferentImage()
+    public void RefreshAndWrite_UpdatesTheDigestAfterAControlledSystemChange()
     {
         Directory.CreateDirectory(_directory);
-        var acceptedImage = "accepted image bytes"u8.ToArray();
-        var otherImage = Path.Combine(_directory, "other.qcow2");
-        File.WriteAllBytes(otherImage, "arbitrary image bytes"u8.ToArray());
+        var image = Path.Combine(_directory, "system.qcow2");
+        File.WriteAllText(image, "changed by successful data initialization");
         var manifest = new SystemImageManifest
         {
-            ImageSha256 = Convert.ToHexString(SHA256.HashData(acceptedImage)),
+            ImageSha256 = new string('0', 64),
+            Versions = new Serpy.Core.Versions.GuestVersionReport
+            {
+                Python = "3.14.7",
+                Node = "24.2.0",
+                MariaDb = "11.8.3",
+                Redis = "8.0.2",
+                Frappe = "16.31.0",
+                ErpNext = "16.32.3",
+            },
         };
 
-        Assert.False(manifest.MatchesImageDigest(otherImage));
+        manifest.RefreshAndWrite(image);
+
+        Assert.True(SystemImageManifest.IsAccepted(image));
+        Assert.Equal("3.14.7", manifest.Versions.Python);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(image))), manifest.ImageSha256);
     }
+
+    [Fact]
+    public void RefreshAndWrite_WritesBesideTheImage_NotToAnUnrelatedDirectory()
+    {
+        Directory.CreateDirectory(_directory);
+        var image = Path.Combine(_directory, "system.qcow2");
+        File.WriteAllText(image, "image");
+        var manifest = new SystemImageManifest();
+
+        manifest.RefreshAndWrite(image);
+
+        Assert.True(File.Exists(Path.Combine(_directory, SystemImageManifest.FileName)));
+        Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(image)!, "system.json")));
+    }
+
+    [Fact]
+    public void MatchesImageDigest_StillRejectsTheOldDigestAfterTheImageChanges()
+    {
+        Directory.CreateDirectory(_directory);
+        var image = Path.Combine(_directory, "system.qcow2");
+        File.WriteAllText(image, "original");
+        var manifest = new SystemImageManifest
+        {
+            ImageSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(image))),
+        };
+        File.AppendAllText(image, "controlled update");
+
+        Assert.False(manifest.MatchesImageDigest(image));
+    }
+
 
     [Fact]
     public void MatchesImageDigest_RejectsLegacyManifestWithoutDigest()
@@ -56,7 +98,6 @@ public sealed class SystemImageManifestTests : IDisposable
 
         Assert.False(new SystemImageManifest().MatchesImageDigest(image));
     }
-
     [Fact]
     public void SwappedRecovery_ValidatesCurrentDiskAgainstReplacementManifest()
     {

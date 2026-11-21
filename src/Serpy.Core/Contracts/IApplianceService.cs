@@ -113,6 +113,12 @@ public interface IApplianceService
     string ComposeSetupDetails();
 
     /// <summary>
+    /// Verifies a submitted Administrator password against the running appliance, saves it
+    /// to encrypted storage on success, and re-runs the health check (KTD12).
+    /// </summary>
+    Task<OperationResult> VerifyPasswordAsync(string password, CancellationToken ct = default);
+
+    /// <summary>
     /// Non-mutating status read. Never acquires the lifecycle lease.
     /// </summary>
     Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default);

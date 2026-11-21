@@ -61,4 +61,41 @@ public sealed class StatusOperationTests : IDisposable
 
         Assert.Equal(Path.Combine(_dir, "build-1.log"), status.LogPath);
     }
+
+    [Fact]
+    public async Task GetStatus_RunningUnhealthy_PasswordNeeded_ExposesLoopbackUrl_AndSetsPasswordRejected()
+    {
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.RunningUnhealthy;
+            s.HealthFailureReason = "password needed";
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+        });
+
+        var status = await new StatusOperation(store).GetStatusAsync();
+
+        Assert.Equal("http://127.0.0.1:18080", status.LoopbackUrl);
+        Assert.True(status.PasswordRejected);
+        Assert.Equal("password needed", status.HealthFailureReason);
+        Assert.Equal(HealthState.RunningUnhealthy, status.Health);
+    }
+
+    [Fact]
+    public async Task GetStatus_Stopped_HidesLoopbackUrl()
+    {
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        store.Mutate(s =>
+        {
+            s.Readiness = ReadinessState.Initialized;
+            s.Health = HealthState.Stopped;
+            s.LoopbackUrl = "http://127.0.0.1:18080";
+        });
+
+        var status = await new StatusOperation(store).GetStatusAsync();
+
+        Assert.Null(status.LoopbackUrl);
+        Assert.False(status.PasswordRejected);
+    }
 }

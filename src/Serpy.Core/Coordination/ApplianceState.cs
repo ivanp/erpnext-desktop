@@ -21,6 +21,12 @@ public sealed class ApplianceState
 
     [JsonPropertyName("health")]
     public HealthState Health { get; set; } = HealthState.Stopped;
+    /// <summary>
+    /// When health is RunningUnhealthy, records why (e.g. "password needed" under KTD12).
+    /// </summary>
+    [JsonPropertyName("healthFailureReason")]
+    public string? HealthFailureReason { get; set; }
+
 
     /// <summary>
     /// Incremented monotonically with each new start attempt.

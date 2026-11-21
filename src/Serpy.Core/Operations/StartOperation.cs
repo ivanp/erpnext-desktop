@@ -51,13 +51,21 @@ public sealed class StartOperation(
         var state = stateStore.Read();
 
         // Guard: already running matching instance.
-        if (state.Health == HealthState.Running &&
-            state.QemuPid.HasValue &&
+        if (state.QemuPid.HasValue &&
             ProcessIdentity.IsAlive(state.QemuPid.Value, state.QemuStartTimeTicks ?? 0))
         {
-            return new OperationResult(operationId, OperationKind.Start,
-                OperationOutcome.Success,
-                $"Appliance already running at {state.LoopbackUrl}", logPath);
+            if (state.Health == HealthState.Running)
+            {
+                return new OperationResult(operationId, OperationKind.Start,
+                    OperationOutcome.Success,
+                    $"Appliance already running at {state.LoopbackUrl}", logPath);
+            }
+
+            if (state.Health == HealthState.RunningUnhealthy && state.HealthFailureReason == "password needed")
+            {
+                return Fail(operationId, "ERPNext rejected the Administrator password: password needed",
+                    logPath, FailureCode.PasswordRejected);
+            }
         }
         // Guard: recovery journal blocks start.
         if (state.RecoveryJournal is { HealthPassed: false })
@@ -120,7 +128,7 @@ public sealed class StartOperation(
             .Machine("q35").Accelerator(accel).Cpu(accel)
             .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
             .FirmwareDir(runtimeResolver.ShareDir)
-            .SystemDisk(state.SystemImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "system.qcow2"))
+            .SystemDisk(state.SystemImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "system.qcow2"), snapshot: true)
             .DataDisk(state.DataImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "data.img"), accel)
             .UserNetWithPortForward(settings.ErpNextPort)
             .TlsCredsX509("tls-qmp",    certStore.QemuCertDir)
@@ -199,8 +207,26 @@ public sealed class StartOperation(
                 }
             }, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(2), ct);
             if (!health.Healthy)
+            {
+                if (health.IsPasswordRejected)
+                {
+                    stateStore.Mutate(s =>
+                    {
+                        s.Health              = HealthState.RunningUnhealthy;
+                        s.HealthFailureReason = "password needed";
+                        s.LoopbackUrl         = loopbackUrl;
+                        s.ActiveOperation     = null;
+                        s.SystemImagePath   ??= Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
+                        s.DataImagePath     ??= Path.Combine(KnownPaths.ApplianceDir, "data.img");
+                    });
+
+                    return Fail(operationId, "ERPNext rejected the Administrator password: password needed",
+                        logPath, FailureCode.PasswordRejected);
+                }
+
                 return await AbortStartAsync(proc, operationId,
                     $"Functional health check failed [{health.FailedCheck}]: {health.Reason}", logPath);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -213,11 +239,12 @@ public sealed class StartOperation(
         }
         stateStore.Mutate(s =>
         {
-            s.Health          = HealthState.Running;
-            s.LoopbackUrl     = loopbackUrl;
-            s.ActiveOperation = null;
-            s.SystemImagePath ??= Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
-            s.DataImagePath   ??= Path.Combine(KnownPaths.ApplianceDir, "data.img");
+            s.Health              = HealthState.Running;
+            s.HealthFailureReason = null;
+            s.LoopbackUrl         = loopbackUrl;
+            s.ActiveOperation     = null;
+            s.SystemImagePath   ??= Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
+            s.DataImagePath     ??= Path.Combine(KnownPaths.ApplianceDir, "data.img");
         });
 
         Report("running", $"Appliance running at {loopbackUrl}", 100);

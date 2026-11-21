@@ -199,16 +199,68 @@ public sealed class HealthCheckerSignInTests : IDisposable
     }
 
     [Fact]
-    public async Task WithNoSavedCredential_TheResultIsNotARejectedPassword()
+    public async Task WithNoSavedCredential_SiteAcceptsAdmin_SucceedsAndStoresCredential()
     {
         Directory.CreateDirectory(_dir);
-        var empty = new HealthCredentials(Path.Combine(_dir, "none"));
+        var creds = new HealthCredentials(Path.Combine(_dir, "stored-cred"));
         var site = new FakeSite(System.Net.HttpStatusCode.OK);
 
-        var result = await Checker(new FakeGuest(), site, empty).RunAsync();
+        var result = await Checker(new FakeGuest(), site, creds).RunAsync();
+
+        Assert.True(result.Healthy);
+        Assert.False(result.IsPasswordRejected);
+        var retrieved = creds.Retrieve();
+        Assert.NotNull(retrieved);
+        Assert.Equal("site1.local", retrieved.Value.SiteName);
+        Assert.Equal("admin", retrieved.Value.AdminPassword);
+    }
+
+    [Fact]
+    public async Task WithNoSavedCredential_SiteRejectsAdmin_ReturnsPasswordRejected_AndDoesNotStore()
+    {
+        Directory.CreateDirectory(_dir);
+        var creds = new HealthCredentials(Path.Combine(_dir, "empty-cred"));
+        var site = new FakeSite(System.Net.HttpStatusCode.Unauthorized);
+
+        var result = await Checker(new FakeGuest(), site, creds).RunAsync();
+
+        Assert.False(result.Healthy);
+        Assert.True(result.IsPasswordRejected);
+        Assert.Equal(HealthResult.PasswordCheck, result.FailedCheck);
+        Assert.Null(creds.Retrieve());
+    }
+
+    [Fact]
+    public async Task WithNoSavedCredential_SiteNotReady_ReturnsGenericAuthFailure_AndDoesNotStore()
+    {
+        Directory.CreateDirectory(_dir);
+        var creds = new HealthCredentials(Path.Combine(_dir, "server-err-cred"));
+        var site = new FakeSite(System.Net.HttpStatusCode.InternalServerError);
+
+        var result = await Checker(new FakeGuest(), site, creds).RunAsync();
 
         Assert.False(result.Healthy);
         Assert.False(result.IsPasswordRejected);
         Assert.Equal("auth", result.FailedCheck);
+        Assert.Null(creds.Retrieve());
+    }
+
+    [Fact]
+    public async Task CheckPasswordAsync_ValidAndRejected_ReportCorrectStatus()
+    {
+        var okSite = new FakeSite(System.Net.HttpStatusCode.OK);
+        var unauthSite = new FakeSite(System.Net.HttpStatusCode.Unauthorized);
+        var creds = Saved();
+
+        var okChecker = Checker(new FakeGuest(), okSite, creds);
+        var unauthChecker = Checker(new FakeGuest(), unauthSite, creds);
+
+        var (valid, rejected) = await okChecker.CheckPasswordAsync("admin");
+        Assert.True(valid);
+        Assert.False(rejected);
+
+        var (unauthValid, unauthRejected) = await unauthChecker.CheckPasswordAsync("wrong");
+        Assert.False(unauthValid);
+        Assert.True(unauthRejected);
     }
 }

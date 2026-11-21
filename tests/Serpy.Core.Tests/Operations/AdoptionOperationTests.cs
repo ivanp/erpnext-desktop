@@ -239,4 +239,88 @@ public sealed class AdoptionOperationTests : IDisposable
         Assert.Equal(originalBackupBytes, File.ReadAllBytes(committedPath));
         Assert.Equal("oldPassword", creds.Retrieve()?.AdminPassword);
     }
+
+    [Fact]
+    public async Task InsufficientDiskSpace_ReturnsDiskFull_BeforeAnyCopy_AndLeavesArchiveUntouched()
+    {
+        var applianceDir = Path.Combine(_dir, "appliance");
+        Directory.CreateDirectory(applianceDir);
+        var archivePath = Path.Combine(applianceDir, "data.img");
+        var archiveBytes = new byte[] { 1, 2, 3, 4, 5 };
+        File.WriteAllBytes(archivePath, archiveBytes);
+
+        var systemPath = Path.Combine(applianceDir, "system.qcow2");
+        File.WriteAllText(systemPath, "system");
+
+        // Force KnownPaths.ApplianceDir override if needed, or point SystemImagePath to appliance
+        var store = new StateStore(Path.Combine(_dir, "state.json"));
+        var creds = new HealthCredentials(Path.Combine(_dir, "creds"));
+        var settings = new ApplianceSettings();
+        var manifest = CreateManifest();
+
+        // Free space is 500 bytes, far less than file length + 2 GiB
+        var op = new AdoptOperation(
+            null!, null!, null!, creds, store, manifest, settings,
+            freeSpaceBytes: () => 500);
+
+        var inspection = new ArchiveInspection(
+            ArchiveInspectionVerdict.AuthenticatedPreflightPassed,
+            archivePath,
+            "expected-digest");
+
+        var parameters = new AdoptParameters(archivePath, "admin");
+        var progress = new Progress<OperationUpdate>();
+
+        var prevAppdata = Environment.GetEnvironmentVariable("SERPY_TEST_APPDATA");
+        try
+        {
+            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", applianceDir);
+            var result = await op.ExecuteAsync(
+                Guid.NewGuid(), parameters, inspection, legacyConsentApproved: true, progress, CancellationToken.None);
+
+            Assert.Equal(OperationOutcome.Failure, result.Outcome);
+            Assert.Equal(FailureCode.DiskFull, result.Code);
+            Assert.Contains("Insufficient free disk space", result.Message);
+            Assert.Equal(archiveBytes, File.ReadAllBytes(archivePath));
+            Assert.False(File.Exists(Path.Combine(applianceDir, ".pending-adopted-data.img")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", prevAppdata);
+        }
+    }
+
+    [Fact]
+    public async Task RejectedInspection_ReturnsDataUnusable_AndLeavesDataUntouched()
+    {
+        var applianceDir = Path.Combine(_dir, "appliance-rej");
+        Directory.CreateDirectory(applianceDir);
+        var archivePath = Path.Combine(applianceDir, "data.img");
+        var archiveBytes = new byte[] { 9, 8, 7, 6 };
+        File.WriteAllBytes(archivePath, archiveBytes);
+
+        var store = new StateStore(Path.Combine(_dir, "state-rej.json"));
+        var creds = new HealthCredentials(Path.Combine(_dir, "creds-rej"));
+        var settings = new ApplianceSettings();
+        var manifest = CreateManifest();
+
+        var op = new AdoptOperation(null!, null!, null!, creds, store, manifest, settings);
+
+        var inspection = new ArchiveInspection(
+            ArchiveInspectionVerdict.Rejected,
+            archivePath,
+            ExpectedDigest: null,
+            RejectionReason: "Incompatible dataset version: downgrade rejected");
+
+        var parameters = new AdoptParameters(archivePath, "admin");
+        var progress = new Progress<OperationUpdate>();
+
+        var result = await op.ExecuteAsync(
+            Guid.NewGuid(), parameters, inspection, legacyConsentApproved: true, progress, CancellationToken.None);
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Equal(FailureCode.DataUnusable, result.Code);
+        Assert.Contains("downgrade rejected", result.Message);
+        Assert.Equal(archiveBytes, File.ReadAllBytes(archivePath));
+    }
 }

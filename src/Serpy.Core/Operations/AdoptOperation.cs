@@ -30,7 +30,8 @@ public sealed class AdoptOperation(
     HealthCredentials healthCredentials,
     StateStore stateStore,
     VersionManifest manifest,
-    ApplianceSettings settings)
+    ApplianceSettings settings,
+    Func<long>? freeSpaceBytes = null)
 {
     private readonly QemuImageTool _imageTool = imageTool;
     private readonly VersionManifest _manifest = manifest;
@@ -64,7 +65,7 @@ public sealed class AdoptOperation(
         // 1. Precondition checks
         if (inspection.Verdict == ArchiveInspectionVerdict.Rejected)
         {
-            return Fail(operationId, inspection.RejectionReason ?? "Archive rejected during inspection.", logPath);
+            return Fail(operationId, inspection.RejectionReason ?? "Archive rejected during inspection.", logPath, FailureCode.DataUnusable);
         }
 
         if (inspection.Verdict == ArchiveInspectionVerdict.LegacyConsentRequired && !legacyConsentApproved)
@@ -94,12 +95,11 @@ public sealed class AdoptOperation(
         var sourceFileInfo = new FileInfo(canonicalArchivePath);
         long requiredBytes = sourceFileInfo.Length + (2L * 1024 * 1024 * 1024);
 
-        string applianceRoot = Path.GetPathRoot(Path.GetFullPath(KnownPaths.ApplianceDir)) ?? KnownPaths.ApplianceDir;
-        var driveInfo = new DriveInfo(applianceRoot);
-        if (driveInfo.AvailableFreeSpace < requiredBytes)
+        long freeSpace = freeSpaceBytes?.Invoke() ?? GetAvailableFreeSpace(canonicalArchivePath);
+        if (freeSpace < requiredBytes)
         {
             long reqGb = (requiredBytes + (1024 * 1024 * 1024 - 1)) / (1024 * 1024 * 1024);
-            long availGb = driveInfo.AvailableFreeSpace / (1024 * 1024 * 1024);
+            long availGb = freeSpace / (1024 * 1024 * 1024);
             return Fail(operationId, $"Insufficient free disk space. Required: {reqGb} GiB, Available: {availGb} GiB.", logPath, FailureCode.DiskFull);
         }
 
@@ -280,45 +280,54 @@ public sealed class AdoptOperation(
 
         string credPath = healthCredentials.StorePath;
         string credBackupPath = credPath + ".bak";
-        if (File.Exists(credPath))
-        {
-            File.Copy(credPath, credBackupPath, overwrite: true);
-        }
         string? backupDataPath = null;
-        if (File.Exists(CommittedDataPath))
+        try
         {
-            backupDataPath = CommittedDataPath + ".bak";
-            File.Replace(PendingDataPath, CommittedDataPath, backupDataPath, ignoreMetadataErrors: true);
+            if (File.Exists(credPath))
+            {
+                File.Copy(credPath, credBackupPath, overwrite: true);
+            }
+            if (File.Exists(CommittedDataPath))
+            {
+                backupDataPath = CommittedDataPath + ".bak";
+                File.Replace(PendingDataPath, CommittedDataPath, backupDataPath, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(PendingDataPath, CommittedDataPath);
+            }
+
+            File.WriteAllText(MarkerPath, DateTimeOffset.UtcNow.ToString("o"));
+
+            // Stage 1: DataPromoted
+            stateStore.Mutate(s =>
+            {
+                if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.DataPromoted;
+            });
+
+            // Stage 2: StateCommitted
+            stateStore.Mutate(s =>
+            {
+                s.Readiness = ReadinessState.Initialized;
+                s.Health = HealthState.Stopped;
+                s.DataImagePath = CommittedDataPath;
+                s.ActiveOperation = null;
+                if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.StateCommitted;
+            });
+
+            // Stage 3: CredentialStored (only after data & state are committed)
+            healthCredentials.Store("site1.local", parameters.AdminPassword);
+            stateStore.Mutate(s =>
+            {
+                if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.CredentialStored;
+            });
         }
-        else
+        catch (Exception ex)
         {
-            File.Move(PendingDataPath, CommittedDataPath);
+            log.Error("Adoption promotion failed; rolling back from backup", ex);
+            ReconcileJournal(stateStore, healthCredentials);
+            return Fail(operationId, $"Promotion failed: {ex.Message}. Original dataset restored.", logPath, FailureCode.DataUnusable);
         }
-
-        File.WriteAllText(MarkerPath, DateTimeOffset.UtcNow.ToString("o"));
-
-        // Stage 1: DataPromoted
-        stateStore.Mutate(s =>
-        {
-            if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.DataPromoted;
-        });
-
-        // Stage 2: StateCommitted
-        stateStore.Mutate(s =>
-        {
-            s.Readiness = ReadinessState.Initialized;
-            s.Health = HealthState.Stopped;
-            s.DataImagePath = CommittedDataPath;
-            s.ActiveOperation = null;
-            if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.StateCommitted;
-        });
-
-        // Stage 3: CredentialStored (only after data & state are committed)
-        healthCredentials.Store("site1.local", parameters.AdminPassword);
-        stateStore.Mutate(s =>
-        {
-            if (s.AdoptionJournal is not null) s.AdoptionJournal.Stage = AdoptionStage.CredentialStored;
-        });
 
         // Stage 4: Cleanup backups only after promotion transaction is committed
         if (backupDataPath != null && File.Exists(backupDataPath))
@@ -513,6 +522,12 @@ public sealed class AdoptOperation(
             s.ActiveOperation = null;
             s.AdoptionJournal = null;
         });
+    }
+
+    private static long GetAvailableFreeSpace(string path)
+    {
+        string applianceRoot = Path.GetPathRoot(Path.GetFullPath(path)) ?? path;
+        return new DriveInfo(applianceRoot).AvailableFreeSpace;
     }
 
     private static OperationResult Fail(Guid id, string msg, string log,

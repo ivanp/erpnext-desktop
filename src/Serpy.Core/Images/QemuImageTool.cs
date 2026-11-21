@@ -20,6 +20,14 @@ public sealed class QemuImageTool(string qemuImgExe)
         await RunAsync(["create", "-f", "qcow2", "-b", sourcePath, "-F", "qcow2", destPath], ct);
 
     /// <summary>
+    /// Commits a temporary qcow2 overlay into its backing image. The caller uses this only after
+    /// the guest has passed its health gate and shut down cleanly; failed runs delete the overlay
+    /// instead, preserving the accepted system image.
+    /// </summary>
+    public async Task CommitAsync(string overlayPath, CancellationToken ct = default) =>
+        await RunAsync(["commit", overlayPath], ct);
+
+    /// <summary>
     /// Create a fresh sparse RAW image of <paramref name="sizeGb"/> GiB.
     /// Used for data.img creation.
     /// </summary>

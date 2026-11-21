@@ -33,8 +33,8 @@ public sealed class QemuArguments
 
     // ── Disks ─────────────────────────────────────────────────────────────
 
-    public QemuArguments SystemDisk(string imagePath, string format = "qcow2") =>
-        Add("-drive", $"file={imagePath},format={format},if=virtio,index=0");
+    public QemuArguments SystemDisk(string imagePath, string format = "qcow2", bool snapshot = false) =>
+        Add("-drive", $"file={imagePath},format={format},if=virtio,index=0{(snapshot ? ",snapshot=on" : string.Empty)}");
 
     /// <summary>
     /// Persistent data disk using the Windows-valid fsync-honoring policy (KTD6):

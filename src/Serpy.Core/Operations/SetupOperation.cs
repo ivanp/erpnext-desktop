@@ -137,6 +137,23 @@ public sealed class SetupOperation
             };
 
             Emit(SetupRunState.Working, force: true);
+            foreach (var step in _steps)
+            {
+                var preflight = step.Preflight(context);
+                if (preflight is { Outcome: OperationOutcome.Failure })
+                {
+                    log.Stage(step.Id.ToString(), $"Preflight failed: {preflight.Message}");
+                    SetStatus(step.Id, SetupStepState.Failed);
+                    _setupStore.Mutate(s =>
+                    {
+                        s.LastFailure = preflight.Code;
+                        s.LastFailedStep = step.Id;
+                    });
+                    Emit(SetupRunState.Failed, preflight.Code, preflight.Message, force: true);
+                    return Result(runId, OperationOutcome.Failure, preflight.Code, step.Id, preflight.Message);
+                }
+            }
+
 
             foreach (var step in _steps)
             {

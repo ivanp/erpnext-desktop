@@ -50,6 +50,16 @@ public sealed class QemuArgumentsTests
     }
 
     [Fact]
+    public void SystemDiskSnapshot_UsesATemporaryWriteLayer_WithoutMakingTheAcceptedImageWritable()
+    {
+        var args = new QemuArguments().SystemDisk("system.qcow2", snapshot: true);
+        var drive = args.Args.First(a => a.Contains("system.qcow2", StringComparison.Ordinal));
+
+        Assert.Contains("snapshot=on", drive);
+        Assert.DoesNotContain("readonly=on", drive);
+    }
+
+    [Fact]
     public void TlsChardev_ContainsTlsCredsRef()
     {
         var args = new QemuArguments().TlsChardev("qmp0", 51843, "tls-qmp");
