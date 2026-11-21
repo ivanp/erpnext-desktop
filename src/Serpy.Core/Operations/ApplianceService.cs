@@ -97,7 +97,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         steps.Add(new StartStep(_startOp, stateStore));
         _setupOp   = new SetupOperation(
             steps,
-            setupStore, stateStore, powerRequest ?? NoPowerRequest.Instance,
+            setupStore, stateStore,
+            powerRequest ?? (OperatingSystem.IsWindows() ? new Platform.Windows.PowerRequest() : NoPowerRequest.Instance),
             () => AdoptOperation.ReconcileJournal(stateStore, healthCredentials),
             manifest: manifest);
     }

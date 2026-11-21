@@ -11,6 +11,7 @@ using Serpy.Core.Operations;
 using Serpy.Core.Platform.Windows;
 using Serpy.Core.Qemu;
 using Serpy.Core.Versions;
+SingleInstanceChannel.SetAppUserModelId();
 
 bool isUnattended = args.Contains("--unattended", StringComparer.OrdinalIgnoreCase) ||
                     args.Contains("--fresh-install", StringComparer.OrdinalIgnoreCase);
@@ -34,12 +35,35 @@ catch (Exception ex)
         Console.Error.WriteLine($"Error acquiring single instance lock: {ex.Message}");
         return 1;
     }
-    // Single-instance guard for GUI: if another Serpy.App is already running, exit cleanly.
+    // Single-instance guard for GUI: tell the primary instance to show or resume setup, then exit cleanly.
+    var cmd = args.Contains("--resume-setup", StringComparer.OrdinalIgnoreCase)
+        ? SingleInstanceCommand.ShowSetup
+        : SingleInstanceCommand.Show;
+    await SingleInstanceChannel.SendCommandAsync(
+        SingleInstanceChannel.ResolvePipeName(), cmd, TimeSpan.FromSeconds(3));
     return 0;
 }
 
 using (singleInstanceMutex)
 {
+    using var pipeServer = SingleInstanceChannel.StartServer(
+        SingleInstanceChannel.ResolvePipeName(),
+        cmd =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (App.Current is App app)
+                {
+                    if (cmd == SingleInstanceCommand.ShowSetup)
+                    {
+                        app.DashboardViewModel?.Setup.Activate();
+                    }
+                    app.ShowDashboardWindow();
+                }
+            });
+        },
+        CancellationToken.None);
+
     bool isResumeSetup = args.Contains("--resume-setup", StringComparer.OrdinalIgnoreCase);
     if (isResumeSetup && OperatingSystem.IsWindows())
     {

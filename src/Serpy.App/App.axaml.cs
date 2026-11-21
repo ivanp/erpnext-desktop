@@ -25,6 +25,10 @@ public sealed class App : Application
     private bool _splashOpenedForThisStart;
     private bool _isExiting;
     private bool _initialAutoStartChecked;
+    private readonly NotificationPolicy _notificationPolicy = new();
+    private readonly ToastNotifier _toastNotifier = new();
+    private TrayState _previousTrayState = TrayState.Stopped;
+
     // Injected by the composition root after construction.
     public IApplianceService? Service { get; set; }
 
@@ -151,6 +155,12 @@ public sealed class App : Application
         var mapped = TrayStateMapper.Map(status, currentStep);
         trayIcon.ToolTipText = mapped.Tooltip;
 
+        var notification = _notificationPolicy.Evaluate(_previousTrayState, mapped.State, status);
+        _previousTrayState = mapped.State;
+        if (notification is not null)
+        {
+            _toastNotifier.Show(notification.Title, notification.Message);
+        }
         try
         {
             var iconUri = new Uri($"avares://Serpy.App{TrayStateMapper.IconPath(mapped.State)}");
