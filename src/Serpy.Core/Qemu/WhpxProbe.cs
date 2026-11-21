@@ -61,6 +61,10 @@ public static class WhpxProbe
 
         var stderr = stderrLines.ToString();
 
+        // An early unexpected exit must be sampled BEFORE our own Kill: a process we terminate
+        // reports HasExited with a nonzero exit code, which would read as a WHPX failure.
+        bool earlyExit = proc.HasExited && proc.ExitCode != 0;
+
         // Kill the paused process — it will never exit under -S.
         if (!proc.HasExited)
         {
@@ -72,9 +76,6 @@ public static class WhpxProbe
             (stderr.Contains("not present",  StringComparison.OrdinalIgnoreCase) ||
              stderr.Contains("unavailable",  StringComparison.OrdinalIgnoreCase) ||
              stderr.Contains("failed to initialise", StringComparison.OrdinalIgnoreCase));
-
-        // Also treat an early unexpected exit (before our Kill) as failure.
-        bool earlyExit = proc.HasExited && proc.ExitCode != 0;
 
         if (whpxFailed || earlyExit)
         {
