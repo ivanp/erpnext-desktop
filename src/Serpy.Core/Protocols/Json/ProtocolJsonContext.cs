@@ -21,9 +21,12 @@ namespace Serpy.Core.Protocols.Json;
 [JsonSerializable(typeof(QgaExecResult))]
 [JsonSerializable(typeof(QgaExecStatusResult))]
 [JsonSerializable(typeof(Dictionary<string, object?>))]
+// QMP and QGA reject a field that is present with a null value ("env": null is "expected: array"), so
+// an optional field that is not set must be left out of the message, never written as null.
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.KebabCaseLower,
-    UseStringEnumConverter = true)]
+    UseStringEnumConverter = true,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 public sealed partial class ProtocolJsonContext : JsonSerializerContext
 {
 }
