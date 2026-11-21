@@ -4,17 +4,24 @@ using Serpy.Core.Operations;
 
 namespace Serpy.Core.Tests.Operations;
 
+// StatusOperation looks for committed data in the app-data folder. Against the real folder, a
+// data.img from a real setup changes the route these tests expect, so they use a temporary root.
+[Collection("LifecycleLock")]
 public sealed class StatusOperationTests : IDisposable
 {
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyStatusTest-{Guid.NewGuid():N}");
 
     public StatusOperationTests()
     {
         Directory.CreateDirectory(_dir);
+        Environment.SetEnvironmentVariable(OverrideVariable, Path.Combine(_dir, "appdata"));
     }
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
         if (Directory.Exists(_dir)) try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 

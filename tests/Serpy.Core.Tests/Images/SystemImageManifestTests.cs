@@ -4,9 +4,18 @@ using Serpy.Core.Operations;
 
 namespace Serpy.Core.Tests.Images;
 
+// RecordAcceptedBuild reads the app-data folder to learn whether committed data exists. Against the
+// real folder, a data.img left by a real setup would make it record Initialized, so these tests use
+// a temporary root, and the collection keeps the process-wide override away from other tests.
+[Collection("LifecycleLock")]
 public sealed class SystemImageManifestTests : IDisposable
 {
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"SerpyManifest-{Guid.NewGuid():N}");
+
+    public SystemImageManifestTests() =>
+        Environment.SetEnvironmentVariable(OverrideVariable, Path.Combine(_directory, "appdata"));
 
     [Fact]
     public void MatchesImageDigest_AcceptsExactQcow2Bytes()
@@ -83,6 +92,7 @@ public sealed class SystemImageManifestTests : IDisposable
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
 }

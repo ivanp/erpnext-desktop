@@ -9,11 +9,19 @@ using Serpy.Core.Operations;
 [Collection("LifecycleLock")]
 public sealed class ApplianceServiceContractTests : IDisposable
 {
+    // RecordAcceptedBuild and the status read look for committed data in the app-data folder. They
+    // use a temporary root, so a data.img from a real setup cannot change what they expect.
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
     private readonly string _dir =
         Path.Combine(Path.GetTempPath(), $"SerpySvcTest-{Guid.NewGuid():N}");
 
+    public ApplianceServiceContractTests() =>
+        Environment.SetEnvironmentVariable(OverrideVariable, Path.Combine(_dir, "appdata"));
+
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
