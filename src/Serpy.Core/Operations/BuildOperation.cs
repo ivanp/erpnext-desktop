@@ -186,7 +186,7 @@ public sealed class BuildOperation(
                 .Machine().Accelerator(accel).Cpu(accel)
                 .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
                 .FirmwareDir(runtimeResolver?.ShareDir ?? AppContext.BaseDirectory)
-                .SystemDisk(StagingPath).Cdrom(SeedIsoPath)
+                .BuildSystemDisk(StagingPath).Cdrom(SeedIsoPath)
                 .TransportDisk(TransportTarPath)
                 .ScratchDisk(ScratchDiskPath)
                 .UserNetRestricted(settings.ErpNextPort)
