@@ -47,6 +47,7 @@ $bootstrapperPublish = (Resolve-Path -LiteralPath $BootstrapperPublishDir).Path
 $requiredAppFiles = @(
     'Serpy.App.exe',
     'config\versions.yaml',
+    'config\build-inputs.json',
     'cloud-init\user-data',
     'cloud-init\meta-data',
     'guest\init-data.sh',
