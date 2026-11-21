@@ -119,6 +119,9 @@ public sealed class InitializeOperation(
             Report("qga", "Waiting for guest agent…", 20);
             await using var serial = await SerialClient.ConnectAsync(
                 "127.0.0.1", serialPort, clientCert, caCert, ct);
+            // Read the console from now on: an undrained one stalls the guest, and its lines are the only
+            // record of a boot that never reaches the guest agent.
+            await using var console = new ConsolePump(serial.ReadLines(ct), log.Guest, ct);
             // The agent comes up some seconds after the boot, so this waits for it (up to 5 minutes).
             await using var qga = await QgaClient.ConnectWhenReadyAsync(
                 "127.0.0.1", qgaPort, clientCert, caCert, ct: ct);
@@ -174,7 +177,7 @@ public sealed class InitializeOperation(
             return new OperationResult(operationId, OperationKind.Initialize,
                 OperationOutcome.Success, $"Initialized '{siteName}'.", logPath);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return new OperationResult(operationId, OperationKind.Initialize,
                 OperationOutcome.Cancelled,
@@ -183,7 +186,9 @@ public sealed class InitializeOperation(
         catch (Exception ex)
         {
             log.Error("Initialization failed", ex);
-            return Fail(operationId, $"Initialization failed: {ex.Message}", logPath);
+            // A timer inside an operation that ends is a failure with a cause, never a cancel by the user.
+            var code = ex is TimeoutException ? FailureCode.GuestConsoleClosed : FailureCode.Unknown;
+            return Fail(operationId, $"Initialization failed: {ex.Message}", logPath, code);
         }
     }
 

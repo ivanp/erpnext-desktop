@@ -226,4 +226,68 @@ public sealed class QgaConnectTests : IDisposable
             "127.0.0.1", rig.Port, rig.Client, rig.Ca, wait: TimeSpan.FromMinutes(5), ct: cts.Token,
             attemptTimeout: TimeSpan.FromMilliseconds(200), retryDelay: TimeSpan.FromMilliseconds(50)));
     }
+
+    // A listener that accepts the TCP connection and then never speaks TLS, like a chardev that QEMU
+    // has opened and nothing serves yet. A hang here must still end at the time limit of the attempt.
+    private static async Task AcceptAndStayMuteAsync(Rig rig)
+    {
+        using var tcp = await rig.Listener.AcceptTcpClientAsync();
+        var one = new byte[1];
+        try { while (await tcp.GetStream().ReadAsync(one) > 0) { } }
+        catch (IOException) { }
+    }
+
+    // A listener that accepts, lets the TLS handshake start, and drops the connection.
+    private static async Task AcceptAndDropAsync(Rig rig)
+    {
+        using var tcp = await rig.Listener.AcceptTcpClientAsync();
+        await Task.Delay(50);
+    }
+
+    [Fact]
+    public async Task AHandshakeThatNeverCompletes_EndsAtTheAttemptTimeout_NamingATimeout()
+    {
+        using var rig = Start();
+        _ = AcceptAndStayMuteAsync(rig);
+
+        var started = DateTime.UtcNow;
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => Serpy.Core.Protocols.Qga.QgaClient.ConnectAsync(
+            "127.0.0.1", rig.Port, rig.Client, rig.Ca, syncTimeout: TimeSpan.FromMilliseconds(400)));
+
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10), "the hang outlasted the time limit");
+        Assert.Contains("timed out", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConnectWhenReady_GivesUpOnTime_EvenWhenEveryHandshakeHangs()
+    {
+        using var rig = Start();
+        _ = Task.Run(async () => { while (true) await AcceptAndStayMuteAsync(rig); });
+
+        var started = DateTime.UtcNow;
+        var ex = await Assert.ThrowsAsync<TimeoutException>(() => Serpy.Core.Protocols.Qga.QgaClient.ConnectWhenReadyAsync(
+            "127.0.0.1", rig.Port, rig.Client, rig.Ca,
+            wait: TimeSpan.FromSeconds(2), attemptTimeout: TimeSpan.FromMilliseconds(300), retryDelay: TimeSpan.FromMilliseconds(50)));
+
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(8), "the retry deadline was not honoured");
+        Assert.Contains("guest agent did not answer", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConnectWhenReady_SucceedsOnTheThirdAttempt_AfterADroppedHandshakeAndASilentOne()
+    {
+        using var rig = Start();
+        _ = Task.Run(async () =>
+        {
+            await AcceptAndDropAsync(rig);                 // attempt 1: the handshake is dropped
+            await ServeOneAsync(rig, answer: false);       // attempt 2: TLS works, the agent is silent
+            await ServeOneAsync(rig, answer: true);        // attempt 3: the agent answers
+        });
+
+        await using var qga = await Serpy.Core.Protocols.Qga.QgaClient.ConnectWhenReadyAsync(
+            "127.0.0.1", rig.Port, rig.Client, rig.Ca,
+            wait: TimeSpan.FromSeconds(20), attemptTimeout: TimeSpan.FromMilliseconds(400), retryDelay: TimeSpan.FromMilliseconds(50));
+
+        Assert.NotNull(qga);
+    }
 }

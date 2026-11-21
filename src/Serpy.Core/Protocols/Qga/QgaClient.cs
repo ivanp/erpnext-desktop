@@ -28,14 +28,9 @@ public sealed class QgaClient : IAsyncDisposable
     public static readonly TimeSpan DefaultReadyWait = TimeSpan.FromMinutes(5);
 
     private readonly SslStream _ssl;
-    private readonly TimeSpan _syncTimeout;
     private bool _disposed;
 
-    private QgaClient(SslStream ssl, TimeSpan syncTimeout)
-    {
-        _ssl = ssl;
-        _syncTimeout = syncTimeout;
-    }
+    private QgaClient(SslStream ssl) => _ssl = ssl;
 
     public static async Task<QgaClient> ConnectAsync(
         string host,
@@ -45,43 +40,59 @@ public sealed class QgaClient : IAsyncDisposable
         CancellationToken ct = default,
         TimeSpan? syncTimeout = null)
     {
-        var tcp = new TcpClient();
-        await tcp.ConnectAsync(host, port, ct);
+        var limit = syncTimeout ?? DefaultSyncTimeout;
 
-        var caCertRef = caCert;
-        var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
-            (_, serverCert, _, _) =>
-            {
-                if (serverCert is null) return false;
-                var serverCert2 = X509CertificateLoader.LoadCertificate(
-                    serverCert.Export(X509ContentType.Cert));
-                using var chain = new X509Chain();
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.Add(caCertRef);
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                return chain.Build(serverCert2);
-            });
+        // One time limit covers the whole attempt: the TCP connect, the TLS handshake and the sync. A
+        // chardev that QEMU has accepted but nobody serves yet can hang any of the three, and a hang in
+        // the first two would otherwise outlast the retry deadline of the caller.
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        attempt.CancelAfter(limit);
 
-        var clientCerts = new X509CertificateCollection { clientCert };
-        await ssl.AuthenticateAsClientAsync(
-            new SslClientAuthenticationOptions
-            {
-                TargetHost = host,
-                ClientCertificates = clientCerts,
-                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13
-                                    | System.Security.Authentication.SslProtocols.Tls12,
-            }, ct);
-
-        var client = new QgaClient(ssl, syncTimeout ?? DefaultSyncTimeout);
+        TcpClient? tcp = null;
+        SslStream? ssl = null;
         try
         {
-            await client.SyncAsync(ct);
+            tcp = new TcpClient();
+            await tcp.ConnectAsync(host, port, attempt.Token);
+
+            var caCertRef = caCert;
+            ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
+                (_, serverCert, _, _) =>
+                {
+                    if (serverCert is null) return false;
+                    var serverCert2 = X509CertificateLoader.LoadCertificate(
+                        serverCert.Export(X509ContentType.Cert));
+                    using var chain = new X509Chain();
+                    chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    chain.ChainPolicy.CustomTrustStore.Add(caCertRef);
+                    chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                    return chain.Build(serverCert2);
+                });
+
+            await ssl.AuthenticateAsClientAsync(
+                new SslClientAuthenticationOptions
+                {
+                    TargetHost = host,
+                    ClientCertificates = new X509CertificateCollection { clientCert },
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13
+                                        | System.Security.Authentication.SslProtocols.Tls12,
+                }, attempt.Token);
+
+            var client = new QgaClient(ssl);
+            await client.SyncAsync(attempt.Token);
             return client;
         }
-        catch
+        catch (Exception ex)
         {
-            // A connection that never synced must not hold the chardev: QEMU serves one client at a time.
-            await ssl.DisposeAsync();
+            // Whatever failed, nothing of this attempt may stay open: QEMU serves one client per
+            // chardev, so a half-open connection would stall the next attempt.
+            if (ssl is not null) await ssl.DisposeAsync();
+            tcp?.Dispose();
+
+            // The attempt timer ending a step is a timeout. Only the token of the caller is a cancel;
+            // reporting the timer as one made Initialize say it was cancelled while the guest booted.
+            if (ex is OperationCanceledException && !ct.IsCancellationRequested)
+                throw new TimeoutException("QGA sync timed out (connect, handshake or sync did not finish in time).", ex);
             throw;
         }
     }
@@ -141,29 +152,18 @@ public sealed class QgaClient : IAsyncDisposable
         var json = JsonSerializer.Serialize(syncReq, ProtocolJsonContext.Default.QgaSyncRequest);
         await WriteLineAsync(json, ct);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(_syncTimeout);
-        try
+        while (true)
         {
-            while (true)
+            var line = await ReadLineAsync(ct);
+            if (string.IsNullOrEmpty(line)) continue;
+            try
             {
-                var line = await ReadLineAsync(cts.Token);
-                if (string.IsNullOrEmpty(line)) continue;
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    if (doc.RootElement.TryGetProperty("return", out var ret)
-                        && ret.TryGetInt32(out var id) && id == expectedId)
-                        return;
-                }
-                catch (JsonException) { }
+                using var doc = JsonDocument.Parse(line);
+                if (doc.RootElement.TryGetProperty("return", out var ret)
+                    && ret.TryGetInt32(out var id) && id == expectedId)
+                    return;
             }
-        }
-        // The sync timer ending a read is a timeout. Only the caller's own token is a cancel; reporting
-        // the timer as one made Initialize say it was cancelled when the guest was only still booting.
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new TimeoutException("QGA sync timed out.");
+            catch (JsonException) { }
         }
     }
 

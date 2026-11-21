@@ -247,8 +247,9 @@ public sealed class RecoverOperation(
 
         await using var proc = QemuProcess.Start(
             runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
-        await using var _ = await SerialClient.ConnectAsync(
+        await using var serial = await SerialClient.ConnectAsync(
             "127.0.0.1", serialPort, clientCert, caCert, ct);
+        await using var console = new ConsolePump(serial.ReadLines(ct), log.Guest, ct);
         await using var qga = await QgaClient.ConnectWhenReadyAsync(
             "127.0.0.1", qgaPort, clientCert, caCert, ct: ct);
         var guestOps = new GuestOperations(qga);
