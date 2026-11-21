@@ -29,15 +29,28 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Serpy is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER">
-      <Publish Dialog="ExitDialog"
-               Control="Finish"
-               Event="DoAction"
-               Value="LaunchApplication"
-               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
-    </ui:WixUI>
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Serpy after setup completes" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <UI>
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="ExitDialog" />
+      <DialogRef Id="ProgressDlg" />
+      <Dialog Id="SerpyInstallDlg" Width="370" Height="270" Title="Serpy">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="340" Height="30" Transparent="yes" NoPrefix="yes" Text="Install Serpy" />
+        <Control Id="Description" Type="Text" X="15" Y="55" Width="340" Height="60" Transparent="yes" NoPrefix="yes" Text="Serpy will be installed on this computer and opened when installation is complete." />
+        <Control Id="Install" Type="PushButton" X="220" Y="235" Width="65" Height="20" Default="yes" Text="Install">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="290" Y="235" Width="65" Height="20" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="NOT Installed" />
+      <InstallUISequence>
+        <Show Dialog="SerpyInstallDlg" Before="ProgressDlg" Condition="NOT Installed" />
+      </InstallUISequence>
+    </UI>
     <Property Id="WixShellExecTarget" Value="[#SerpyAppExe]" />
     <CustomAction Id="LaunchApplication" BinaryRef="Wix4UtilCA_X86" DllEntry="WixShellExec" Impersonate="yes" />
     <Feature Id="MainFeature" Title="Serpy" Level="1">
@@ -123,7 +136,9 @@
                   Name="Serpy"
                   Directory="StartMenuSerpyFolder"
                   Target="[#SerpyAppExe]"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="Serpy" />
+        </Shortcut>
         <RemoveFolder Id="RemoveStartMenuSerpyFolder" Directory="StartMenuSerpyFolder" On="uninstall" />
         <RegistryValue Root="HKLM" Key="Software\Serpy" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
       </Component>
