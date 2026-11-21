@@ -19,8 +19,8 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 448 | Pass — 2026-11-21 |
-| `Serpy.App.Tests` | 126 | Pass — 2026-11-21 |
+| `Serpy.Core.Tests` | 498 | Pass — 2026-11-21 |
+| `Serpy.App.Tests` | 153 | Pass — 2026-11-21 |
 | `Serpy.InstallerBootstrapper.Tests` | 20 | Pass — 2026-11-21 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |

@@ -58,7 +58,7 @@ public static class UiText
     public static readonly string WelcomeTitle = Plain("Set up ERPNext on this PC");
     public static readonly string WelcomeBody = Plain(
         "Serpy will download ERPNext and put it together on this PC. You don't have to do anything while it works.");
-    public static readonly string WelcomeTime = Plain("Takes about 1 hour");
+    public static readonly string WelcomeTime = Plain("Takes about 15 minutes");
     public static readonly string WelcomeInternet = Plain("Needs the internet until the downloads finish");
     public static readonly string WelcomeKeepUsing = Plain("You can keep using your PC");
     public static readonly string StartAtSignInLabel = Plain("Start Serpy when I sign in to Windows");

@@ -10,9 +10,8 @@ Authoritative plan: `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotn
 
 ## Status
 
-- U1–U12 of the easy-install plan are done and committed: provisioning script and fail-fast serial monitor, file lease, the resumable `SetupOperation` with PC check, one elevation and restart, company data step, setup and everyday views, tray states, toasts, second-launch handling, keep-awake, and the one-click MSI.
-- U14–U16 are implemented: the Pinned Input List loader, the parallel download engine and cache, and the offline guest build from a read-only cache disk. The Pinned Input List generator output and the restrict=on end-to-end build are NOT yet verified; see `docs/results.md`.
-- U17 (acceptance run, Welcome screen figures, final docs) is open.
+- U1–U16 of the easy-install plan are complete and committed: provisioning script and fail-fast serial monitor, file lease, the resumable `SetupOperation` with PC check, one elevation and restart, company data step, setup and everyday views, tray states, toasts, second-launch handling, keep-awake, the one-click MSI, the Pinned Input List generator and AOT loader, the parallel download engine and cache, and the offline guest build from a read-only cache disk under `restrict=on` (verified in 3.5 minutes with all 6 version gates passed).
+- U17 is open: clean install from the MSI, the second run downloading nothing, and the observed first-time user acceptance run are pending the opt-in acceptance run; see `docs/results.md`.
 
 ## Architecture
 
