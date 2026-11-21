@@ -157,6 +157,11 @@ fi
 
 log "Installing ERPNext on $SITE_NAME…"
 run_bench --site "$SITE_NAME" install-app erpnext
+# A new Frappe site starts with its scheduler off, and only the first-run wizard turns it on. The
+# appliance needs it from the start (emails, background jobs, the health gate of the host), and
+# bench scheduler status then reports "enabled".
+log "Enabling the scheduler on $SITE_NAME…"
+run_bench --site "$SITE_NAME" enable-scheduler
 log "Setting default site…"
 run_bench use "$SITE_NAME"
 
