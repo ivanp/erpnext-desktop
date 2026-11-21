@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\serpy.ico" />
+    <AvaloniaResource Include="Assets\*.ico" />
   </ItemGroup>
 
   <!-- Program.cs resolves these beside a packaged GUI executable. -->

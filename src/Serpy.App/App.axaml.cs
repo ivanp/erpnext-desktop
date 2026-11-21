@@ -10,7 +10,7 @@ using Serpy.App.Platform;
 using Serpy.App.ViewModels;
 using Serpy.App.Platform.Windows;
 using Serpy.App.Views;
-
+using Serpy.App.Tray;
 namespace Serpy.App;
 
 public sealed class App : Application
@@ -24,7 +24,7 @@ public sealed class App : Application
     private Avalonia.Threading.DispatcherTimer? _pollTimer;
     private bool _splashOpenedForThisStart;
     private bool _isExiting;
-
+    private bool _initialAutoStartChecked;
     // Injected by the composition root after construction.
     public IApplianceService? Service { get; set; }
 
@@ -102,34 +102,76 @@ public sealed class App : Application
     private void HandlePostStatusUpdate()
     {
         if (_dashboardVm is null) return;
+        var status = _dashboardVm.Status;
+
+        UpdateTrayState(status);
+
         // Guided setup owns the window while it is active: no auto-browser (AE13), no splash.
         if (_dashboardVm.Setup.SetupActive)
         {
             DismissSplash();
+            return;
         }
 
-        var status = _dashboardVm.Status;
-
-        // Auto-open browser once when appliance reaches healthy (AE8, R17).
-        if (status.Health == HealthState.Running && status.LoopbackUrl is { } url)
+        // Automatic start of ERPNext on launch when already set up (KTD18, R33).
+        if (!_initialAutoStartChecked)
         {
-            _browser.OpenOnce(url);
+            _initialAutoStartChecked = true;
+            if (status.RecommendedRoute == LaunchRoute.Start &&
+                status.Health == HealthState.Stopped &&
+                status.ActiveOperation is null)
+            {
+                _ = _dashboardVm.StartCommand.ExecuteAsync(null);
+            }
+        }
+
+        // Terminal state (stopped/crashed/unhealthy) or healthy — dismiss splash if shown.
+        if (status.Health == HealthState.Running || (status.ActiveOperation is null && _splashOpenedForThisStart))
+        {
             DismissSplash();
         }
-        else if (status.ActiveOperation is null && _splashOpenedForThisStart)
-        {
-            // Terminal state (stopped/crashed/unhealthy) — dismiss splash if shown.
-            DismissSplash();
-        }
 
-        if (status.Health == HealthState.Starting && !_splashOpenedForThisStart)
+        if (status.Health == HealthState.Starting && !_splashOpenedForThisStart && !_trayOnly)
         {
-            _browser.ResetForNewStart();
             ShowSplash();
             _splashOpenedForThisStart = true;
         }
     }
 
+    private void UpdateTrayState(ApplianceStatus status)
+    {
+        var icons = TrayIcon.GetIcons(this);
+        if (icons is null || icons.Count == 0) return;
+        var trayIcon = icons[0];
+
+        SetupStepId? currentStep = _dashboardVm?.Setup is { SetupActive: true } setup
+            ? GetCurrentSetupStep(setup)
+            : null;
+
+        var mapped = TrayStateMapper.Map(status, currentStep);
+        trayIcon.ToolTipText = mapped.Tooltip;
+
+        try
+        {
+            var iconUri = new Uri($"avares://Serpy.App{TrayStateMapper.IconPath(mapped.State)}");
+            if (Avalonia.Platform.AssetLoader.Exists(iconUri))
+            {
+                trayIcon.Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(iconUri));
+            }
+        }
+        catch
+        {
+            // Keep existing icon if asset load fails
+        }
+    }
+
+    private static SetupStepId? GetCurrentSetupStep(SetupViewModel setup)
+    {
+        if (setup.ShowChecking) return SetupStepId.PcCheck;
+        if (setup.ShowDownloads) return SetupStepId.Download;
+        if (setup.ShowInstalling) return SetupStepId.Build;
+        return null;
+    }
     // ── Splash ────────────────────────────────────────────────────────────
 
     private void ShowSplash()
@@ -205,8 +247,10 @@ public sealed class App : Application
 
     internal async Task HandleExitRequestAsync()
     {
-        var status = _dashboardVm?.Status;
-        if (status?.Health is not (HealthState.Running or HealthState.RunningUnhealthy))
+        var isSetupWorking = _dashboardVm?.Setup is { SetupActive: true, ShowStepper: true };
+        var isApplianceRunning = _dashboardVm?.Status.Health is HealthState.Running or HealthState.RunningUnhealthy;
+
+        if (!isSetupWorking && !isApplianceRunning)
         {
             DoExit();
             return;
@@ -214,12 +258,20 @@ public sealed class App : Application
 
         var choice = ExitChoiceRequested is not null
             ? await ExitChoiceRequested()
-            : await RequestExitChoiceAsync();
+            : await RequestExitChoiceAsync(isSetupWorking);
+
         if (choice == ExitWhileRunningChoice.Stop)
         {
-            await _dashboardVm!.StopCommand.ExecuteAsync(null);
-            if (_dashboardVm.Status.Health is HealthState.Running or HealthState.RunningUnhealthy)
-                return;
+            if (isSetupWorking)
+            {
+                _dashboardVm!.Setup.CancelSetupCommand.Execute(null);
+            }
+            else
+            {
+                await _dashboardVm!.StopCommand.ExecuteAsync(null);
+                if (_dashboardVm.Status.Health is HealthState.Running or HealthState.RunningUnhealthy)
+                    return;
+            }
             DoExit();
         }
         else if (choice == ExitWhileRunningChoice.LeaveRunning)
@@ -241,11 +293,11 @@ public sealed class App : Application
 
     // ── Credential dialog ─────────────────────────────────────────────────
 
-    private async Task<ExitWhileRunningChoice> RequestExitChoiceAsync()
+    private async Task<ExitWhileRunningChoice> RequestExitChoiceAsync(bool isSetup = false)
     {
         if (_dashboardWindow is null) ShowDashboardWindow();
         if (_dashboardWindow is null) return ExitWhileRunningChoice.Cancel;
-        return await new ExitWhileRunningDialog()
+        return await new ExitWhileRunningDialog(isSetup)
             .ShowDialog<ExitWhileRunningChoice>(_dashboardWindow);
     }
 

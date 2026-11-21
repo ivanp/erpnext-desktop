@@ -287,4 +287,63 @@ public sealed class DashboardViewModelTests
 
         Assert.Equal([expected], service.CalledOperations);
     }
+
+    // ── U10 Everyday View & Tray Scenarios ───────────────────────────────
+
+    [Theory]
+    [InlineData(HealthState.Stopped, "Start ERPNext")]
+    [InlineData(HealthState.Crashed, "Start ERPNext")]
+    [InlineData(HealthState.Running, "Stop ERPNext")]
+    [InlineData(HealthState.RunningUnhealthy, "Stop ERPNext")]
+    public void StartOrStopButtonLabel_FollowsHealthState(HealthState health, string expected)
+    {
+        var vm = MakeVm();
+        vm.Status = Status(ReadinessState.Initialized, health);
+        Assert.Equal(expected, vm.StartOrStopButtonLabel);
+    }
+
+    [Fact]
+    public void CanOpenErpNext_TrueWhenHealthyOrPasswordRejected()
+    {
+        var vm = MakeVm();
+        vm.Status = Status(ReadinessState.Initialized, HealthState.Running);
+        Assert.True(vm.CanOpenErpNext);
+
+        vm.Status = new ApplianceStatus(ReadinessState.Initialized, HealthState.RunningUnhealthy, null, null, null, null, PasswordRejected: true);
+        Assert.True(vm.CanOpenErpNext);
+
+        vm.Status = Status(ReadinessState.Initialized, HealthState.Stopped);
+        Assert.False(vm.CanOpenErpNext);
+    }
+
+    [Fact]
+    public async Task StartOrStopCommand_DispatchesStartWhenStoppedAndStopWhenRunning()
+    {
+        var service = new FakeApplianceService();
+        var vm = MakeVm();
+        vm.SetService(service);
+
+        vm.Status = Status(ReadinessState.Initialized, HealthState.Stopped);
+        await vm.StartOrStopCommand.ExecuteAsync(null);
+        Assert.Equal([OperationKind.Start], service.CalledOperations);
+
+        service.CalledOperations.Clear();
+        vm.Status = Status(ReadinessState.Initialized, HealthState.Running);
+        await vm.StartOrStopCommand.ExecuteAsync(null);
+        Assert.Equal([OperationKind.Stop], service.CalledOperations);
+    }
+
+    [Fact]
+    public void ToggleStartAtSignIn_TogglesAndRaisesEvent()
+    {
+        var vm = MakeVm();
+        bool? captured = null;
+        vm.AutostartRequested += (_, enabled) => captured = enabled;
+
+        vm.StartAtSignIn = false;
+        vm.ToggleStartAtSignInCommand.Execute(null);
+
+        Assert.True(vm.StartAtSignIn);
+        Assert.True(captured);
+    }
 }

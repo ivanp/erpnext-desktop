@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Serpy.App.Text;
 using Serpy.Core.Contracts;
 
 namespace Serpy.App.ViewModels;
@@ -28,7 +29,8 @@ public sealed partial class DashboardViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanBuild), nameof(CanInitialize), nameof(CanRecover),
         nameof(CanStart), nameof(CanRestart), nameof(CanStop), nameof(IsHealthy),
-        nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(CanExecutePrimaryAction))]
+        nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(CanExecutePrimaryAction),
+        nameof(StartOrStopButtonLabel), nameof(CanStartOrStop), nameof(CanOpenErpNext))]
     private ApplianceStatus _status = new(
         ReadinessState.NotBuilt, HealthState.Stopped,
         null, null, null, null);
@@ -76,6 +78,16 @@ public sealed partial class DashboardViewModel : ObservableObject
         Status.Health is HealthState.Running or HealthState.RunningUnhealthy;
 
     public bool IsHealthy => Status.Health == HealthState.Running;
+
+    public bool CanOpenErpNext => Status.Health == HealthState.Running || Status.PasswordRejected;
+
+    public string StartOrStopButtonLabel =>
+        Status.Health is HealthState.Running or HealthState.RunningUnhealthy
+            ? UiText.StopErpNext
+            : UiText.StartErpNext;
+
+    public bool CanStartOrStop =>
+        Status.Health is HealthState.Running or HealthState.RunningUnhealthy ? CanStop : CanStart;
 
     public string StatusBadgeText => ShowDetails
         ? Status.Health switch
@@ -154,6 +166,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         RestartCommand.NotifyCanExecuteChanged();
         RecoverCommand.NotifyCanExecuteChanged();
         OpenErpNextCommand.NotifyCanExecuteChanged();
+        StartOrStopCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnIsOperationRunningChanged(bool value)
@@ -165,7 +178,24 @@ public sealed partial class DashboardViewModel : ObservableObject
         RestartCommand.NotifyCanExecuteChanged();
         RecoverCommand.NotifyCanExecuteChanged();
         OpenErpNextCommand.NotifyCanExecuteChanged();
+        StartOrStopCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanStartOrStop))]
+    private async Task StartOrStopAsync()
+    {
+        if (Status.Health is HealthState.Running or HealthState.RunningUnhealthy)
+            await StopAsync();
+        else
+            await StartAsync();
+    }
+
+    [RelayCommand]
+    private void ToggleStartAtSignIn()
+    {
+        StartAtSignIn = !StartAtSignIn;
+        AutostartRequested?.Invoke(this, StartAtSignIn);
     }
 
     // ── Shell commands (no service call) ─────────────────────────────────

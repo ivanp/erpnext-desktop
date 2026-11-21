@@ -46,4 +46,14 @@ public static class TrayStateMapper
 
         return new(TrayState.Stopped, UiText.TrayStopped);
     }
+
+    public static string IconPath(TrayState state) => state switch
+    {
+        TrayState.SettingUp => "/Assets/tray-setting-up.ico",
+        TrayState.Starting => "/Assets/tray-starting.ico",
+        TrayState.Ready => "/Assets/tray-ready.ico",
+        TrayState.Stopped => "/Assets/tray-stopped.ico",
+        TrayState.NeedsAttention => "/Assets/tray-attention.ico",
+        _ => "/Assets/serpy.ico",
+    };
 }

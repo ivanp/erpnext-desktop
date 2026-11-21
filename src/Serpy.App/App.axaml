@@ -14,26 +14,22 @@
         <TrayIcon.Menu>
           <NativeMenu>
             <NativeMenuItem x:DataType="vm:DashboardViewModel"
-                            Header="Show Dashboard"
+                            Header="Open ERPNext"
+                            Command="{Binding OpenErpNextCommand}"
+                            IsEnabled="{Binding CanOpenErpNext}" />
+            <NativeMenuItem x:DataType="vm:DashboardViewModel"
+                            Header="Open Serpy"
                             Command="{Binding ShowDashboardCommand}" />
             <NativeMenuItemSeparator />
             <NativeMenuItem x:DataType="vm:DashboardViewModel"
-                            Header="Start"
-                            Command="{Binding StartCommand}"
-                            IsEnabled="{Binding CanStart}" />
+                            Header="{Binding StartOrStopButtonLabel}"
+                            Command="{Binding StartOrStopCommand}"
+                            IsEnabled="{Binding CanStartOrStop}" />
             <NativeMenuItem x:DataType="vm:DashboardViewModel"
-                            Header="Restart"
-                            Command="{Binding RestartCommand}"
-                            IsEnabled="{Binding CanRestart}" />
-            <NativeMenuItem x:DataType="vm:DashboardViewModel"
-                            Header="Stop"
-                            Command="{Binding StopCommand}"
-                            IsEnabled="{Binding CanStop}" />
-            <NativeMenuItemSeparator />
-            <NativeMenuItem x:DataType="vm:DashboardViewModel"
-                            Header="Open ERPNext"
-                            Command="{Binding OpenErpNextCommand}"
-                            IsEnabled="{Binding IsHealthy}" />
+                            Header="Start Serpy when I sign in"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding StartAtSignIn}"
+                            Command="{Binding ToggleStartAtSignInCommand}" />
             <NativeMenuItemSeparator />
             <NativeMenuItem x:DataType="vm:DashboardViewModel"
                             Header="Exit…"

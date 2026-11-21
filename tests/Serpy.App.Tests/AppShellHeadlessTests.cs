@@ -45,13 +45,14 @@ public sealed class AppShellHeadlessTests
         var icons = app.GetValue(TrayIcon.IconsProperty);
         var icon = Assert.Single(Assert.IsType<TrayIcons>(icons));
         var menu = Assert.IsType<NativeMenu>(icon.Menu);
-        var headers = menu.Items.OfType<NativeMenuItem>().Select(item => item.Header).ToArray();
+        var headers = menu.Items.OfType<NativeMenuItem>()
+            .Select(item => item.Header)
+            .Where(h => h is not null)
+            .ToArray();
 
-        Assert.Contains("Show Dashboard", headers);
-        Assert.Contains("Start", headers);
-        Assert.Contains("Restart", headers);
-        Assert.Contains("Stop", headers);
         Assert.Contains("Open ERPNext", headers);
+        Assert.Contains("Open Serpy", headers);
+        Assert.Contains("Start Serpy when I sign in", headers);
         Assert.Contains("Exit…", headers);
     }
 

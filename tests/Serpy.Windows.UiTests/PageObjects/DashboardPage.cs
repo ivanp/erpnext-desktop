@@ -21,7 +21,11 @@ public sealed class DashboardPage(Window window, UIA3Automation automation, Appl
         _window.FindFirstDescendant(cf => cf.ByAutomationId("ProgressBar"))?.AsProgressBar();
 
     public Button? PrimaryActionButton =>
-        _window.FindFirstDescendant(cf => cf.ByAutomationId("PrimaryActionButton"))?.AsButton();
+        _window.FindFirstDescendant(cf => cf.ByAutomationId("PrimaryActionButton"))?.AsButton() ??
+        _window.FindFirstDescendant(cf => cf.ByAutomationId("StartOrStopButton"))?.AsButton();
+
+    public Button? StartOrStopButton =>
+        _window.FindFirstDescendant(cf => cf.ByAutomationId("StartOrStopButton"))?.AsButton();
 
     public Button? BuildButton =>
         _window.FindFirstDescendant(cf => cf.ByAutomationId("BuildButton"))?.AsButton();
@@ -30,8 +34,8 @@ public sealed class DashboardPage(Window window, UIA3Automation automation, Appl
         _window.FindFirstDescendant(cf => cf.ByAutomationId("InitializeButton"))?.AsButton();
 
     public Button? StopButton =>
-        _window.FindFirstDescendant(cf => cf.ByAutomationId("StopButton"))?.AsButton();
-
+        _window.FindFirstDescendant(cf => cf.ByAutomationId("StopButton"))?.AsButton() ??
+        _window.FindFirstDescendant(cf => cf.ByAutomationId("StartOrStopButton"))?.AsButton();
     public Button? RestartButton =>
         _window.FindFirstDescendant(cf => cf.ByAutomationId("RestartButton"))?.AsButton();
 
