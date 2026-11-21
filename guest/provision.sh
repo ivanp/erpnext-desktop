@@ -79,6 +79,12 @@ main() {
   npm install -g yarn@1.22.22
   yarn --version
 
+  # Every command that bench, yarn and the asset build call must exist before the long steps run.
+  # A missing one otherwise surfaces about nine minutes in, behind bench's rollback prompt.
+  for tool in git crontab yarn uv node npm redis-server mariadbd nginx supervisord pkg-config fc-cache; do
+    command -v "$tool" > /dev/null || { echo "missing tool: $tool"; exit 127; }
+  done
+
   stage erpnext-source
   useradd -m -s /bin/bash frappe
   su - frappe -c "bench init --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench && cd /home/frappe/frappe-bench/apps/frappe && git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99 && git rev-parse HEAD | grep -Fx 6a329d068416768ec47ccd3326b9cc95a8d7bf99"
