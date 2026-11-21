@@ -30,6 +30,8 @@ public sealed class BuildStep(
     private string SystemImage => Path.Combine(_applianceDir(), "system.qcow2");
     private string Staging => Path.Combine(_applianceDir(), ".staging-system.qcow2");
     private string Seed => Path.Combine(_applianceDir(), ".cloud-init-seed.iso");
+    private string Transport => Path.Combine(_applianceDir(), ".cache-transport.tar");
+    private string Scratch => Path.Combine(_applianceDir(), ".scratch.raw");
 
     public bool IsDone(SetupContext context)
     {
@@ -62,6 +64,8 @@ public sealed class BuildStep(
 
         DeleteIfPresent(Staging, context);
         DeleteIfPresent(Seed, context);
+        DeleteIfPresent(Transport, context);
+        DeleteIfPresent(Scratch, context);
     }
 
     private static void DeleteIfPresent(string path, SetupContext context)

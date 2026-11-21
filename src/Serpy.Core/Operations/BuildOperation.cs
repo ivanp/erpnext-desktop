@@ -1,7 +1,9 @@
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
+using Serpy.Core.Downloads;
 using Serpy.Core.Guest;
 using Serpy.Core.Images;
 using Serpy.Core.Protocols;
@@ -18,25 +20,34 @@ namespace Serpy.Core.Operations;
 /// Sequence (R8, R9, R10):
 ///   1. Download + verify Debian base image.
 ///   2. Write NoCloud seed ISO in-process (KTD10).
-///   3. Create staging qcow2 copy via managed qemu-img.
-///   4. Boot headlessly with cloud-init.
-///   5. Wait for SERPY_PROVISION_DONE sentinel on authenticated serial channel (KTD9).
-///   6. Query installed versions via QGA; run R9 gate.
-///   7. Graceful powerdown; wait for exit.
-///   8. Write acceptance manifest + atomic rename to system.qcow2.
+///   3. Pack offline cache into transport tar (KTD29) and create scratch raw disk.
+///   4. Create staging qcow2 copy via managed qemu-img.
+///   5. Boot headlessly with restricted networking (KTD30) and cloud-init.
+///   6. Wait for SERPY_PROVISION_DONE sentinel on authenticated serial channel (KTD9).
+///   7. Query installed versions via QGA; run R9 gate.
+///   8. Graceful powerdown; wait for exit.
+///   9. Write acceptance manifest + atomic rename to system.qcow2.
 ///
 /// Interruption safety: staging image and acceptance manifest are published only after all
 /// gates pass. Lifecycle preflight rejects any system.qcow2 missing the manifest.
 /// </summary>
 public sealed class BuildOperation(
-    BaseImageDownloader imageDownloader,
-    NoCloudSeedWriter seedWriter,
-    QemuImageTool imageTool,
-    ManagedRuntimeResolver runtimeResolver,
+    BaseImageDownloader? imageDownloader,
+    NoCloudSeedWriter? seedWriter,
+    QemuImageTool? imageTool,
+    ManagedRuntimeResolver? runtimeResolver,
     TlsCertificateStore certStore,
     StateStore stateStore,
     VersionManifest manifest,
-    ApplianceSettings settings)
+    ApplianceSettings settings,
+    BuildInputs? buildInputs = null,
+    DownloadCache? downloadCache = null,
+    Func<long>? freeSpaceBytes = null,
+    Func<string, IReadOnlyList<string>, string?, OperationLog?, bool, QemuProcess>? startProcess = null,
+    Func<string, int, CancellationToken, Task>? createSparseRaw = null,
+    Func<int, X509Certificate2, X509Certificate2, CancellationToken, Task<IAsyncEnumerable<string>>>? connectSerialLines = null,
+    Func<int, X509Certificate2, X509Certificate2, CancellationToken, Task<GuestVersionReport>>? queryVersions = null,
+    Func<int, X509Certificate2, X509Certificate2, CancellationToken, Task>? sendPowerdown = null)
 {
     /// <summary>The guest must print its started marker within this time of the boot (KTD2).</summary>
     public static readonly TimeSpan ProvisionStartWindow = TimeSpan.FromMinutes(5);
@@ -47,10 +58,15 @@ public sealed class BuildOperation(
     /// <summary>Longest the whole provisioning may take.</summary>
     public static readonly TimeSpan ProvisionTimeout = TimeSpan.FromHours(2);
 
-    private string StagingPath  => Path.Combine(KnownPaths.ApplianceDir, ".staging-system.qcow2");
-    private string FinalPath    => Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
-    private string ManifestPath => Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
-    private string SeedIsoPath  => Path.Combine(KnownPaths.ApplianceDir, ".cloud-init-seed.iso");
+    public const int ScratchDiskGb = 12;
+
+    public string StagingPath      => Path.Combine(KnownPaths.ApplianceDir, ".staging-system.qcow2");
+    public string FinalPath        => Path.Combine(KnownPaths.ApplianceDir, "system.qcow2");
+    public string ManifestPath     => Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
+    public string SeedIsoPath      => Path.Combine(KnownPaths.ApplianceDir, ".cloud-init-seed.iso");
+    public string TransportTarPath => Path.Combine(KnownPaths.ApplianceDir, ".cache-transport.tar");
+    public string ScratchDiskPath  => Path.Combine(KnownPaths.ApplianceDir, ".scratch.raw");
+
     public async Task<OperationResult> ExecuteAsync(
         Guid operationId,
         IProgress<OperationUpdate> progress,
@@ -79,22 +95,83 @@ public sealed class BuildOperation(
 
         try
         {
-            // 2. Base image
-            Report("download", "Downloading Debian base image…", 5);
-            await imageDownloader.EnsureAsync(
-                new Progress<string>(m => Report("download", m)), ct);
+            // 1. Clean up leftovers from any earlier crashed or interrupted run (KTD10)
+            RemoveStaging();
+            DeleteIfPresent(SeedIsoPath);
+            CacheTransport.Delete(TransportTarPath);
+            DeleteIfPresent(ScratchDiskPath);
 
-            // 3. Seed ISO
-            Report("seed", "Writing cloud-init seed ISO…", 15);
-            seedWriter.Write(SeedIsoPath);
+            var inputs = buildInputs ?? TryLoadBuildInputs();
+            var cache = downloadCache ?? new DownloadCache();
 
-            // 4. Staging image
+            // 2. Free disk space guard BEFORE any packing or file creation
+            var guestFiles = (inputs.Parts ?? Enumerable.Empty<InputPart>())
+                .SelectMany(p => p.Files ?? Enumerable.Empty<InputFile>())
+                .Where(f => f.InGuest)
+                .ToList();
+            long guestBytes = guestFiles.Sum(f => f.Size);
+            long scratchBytes = (long)ScratchDiskGb * 1024 * 1024 * 1024;
+            long requiredSpace = (guestBytes > 0 ? guestBytes : 1024 * 1024) + scratchBytes;
+
+            long freeSpace = freeSpaceBytes?.Invoke() ?? GetAvailableFreeSpace(KnownPaths.ApplianceDir);
+            if (freeSpace < requiredSpace)
+            {
+                log.Info($"Insufficient disk space for transport and scratch disks. Required: {requiredSpace} bytes, available: {freeSpace} bytes.");
+                return Fail(operationId, opKind,
+                    $"Insufficient free disk space on {KnownPaths.ApplianceDir}. Required: {requiredSpace / (1024 * 1024)} MB, available: {freeSpace / (1024 * 1024)} MB.",
+                    logPath,
+                    FailureCode.DiskFull);
+            }
+
+            // 3. Base image
+            if (imageDownloader is not null)
+            {
+                Report("download", "Downloading Debian base image…", 5);
+                await imageDownloader.EnsureAsync(
+                    new Progress<string>(m => Report("download", m)), ct);
+            }
+
+            // 4. Seed ISO
+            if (seedWriter is not null)
+            {
+                Report("seed", "Writing cloud-init seed ISO…", 15);
+                seedWriter.Write(SeedIsoPath);
+            }
+
+            // 5. Pack offline transport cache (re-verifies checksums during copy; fails fast on mismatch)
+            Report("transport", "Packing offline transport cache…", 18);
+            CacheTransport.WriteTar(TransportTarPath, inputs, cache, ct);
+
+            // 6. Temporary scratch disk for in-guest cache unpack and git materialization
+            Report("scratch", "Creating temporary scratch disk…", 19);
+            if (createSparseRaw is not null)
+            {
+                await createSparseRaw(ScratchDiskPath, ScratchDiskGb, ct);
+            }
+            else if (imageTool is not null)
+            {
+                await imageTool.CreateSparseRawAsync(ScratchDiskPath, ScratchDiskGb, ct);
+            }
+            else
+            {
+                File.WriteAllBytes(ScratchDiskPath, new byte[512]);
+            }
+
+            // 7. Staging image
             Report("image", "Creating staging system image…", 20);
             if (File.Exists(StagingPath)) File.Delete(StagingPath);
-            await imageTool.CreateCopyAsync(imageDownloader.CachedImagePath, StagingPath, ct);
-            await imageTool.ResizeAsync(StagingPath, 32, ct);
+            var baseImagePath = imageDownloader?.CachedImagePath ?? Path.Combine(KnownPaths.ApplianceDir, "debian-base.qcow2");
+            if (imageTool is not null)
+            {
+                await imageTool.CreateCopyAsync(baseImagePath, StagingPath, ct);
+                await imageTool.ResizeAsync(StagingPath, 32, ct);
+            }
+            else
+            {
+                File.Copy(baseImagePath, StagingPath, overwrite: true);
+            }
 
-            // 5. TLS material
+            // 8. TLS material
             if (!certStore.IsInitialized()) certStore.GenerateCertificates();
             var clientCert = certStore.LoadClientCert();
             var caCert     = certStore.LoadCaCert();
@@ -108,9 +185,11 @@ public sealed class BuildOperation(
                 .VmName("serpy-build")
                 .Machine().Accelerator(accel).Cpu(accel)
                 .Smp(settings.CpuCores).Memory(settings.MemoryMb).Headless()
-                .FirmwareDir(runtimeResolver.ShareDir)
+                .FirmwareDir(runtimeResolver?.ShareDir ?? AppContext.BaseDirectory)
                 .SystemDisk(StagingPath).Cdrom(SeedIsoPath)
-                .UserNetWithPortForward(settings.ErpNextPort)
+                .TransportDisk(TransportTarPath)
+                .ScratchDisk(ScratchDiskPath)
+                .UserNetRestricted(settings.ErpNextPort)
                 .TlsCredsX509("tls-serial", certStore.QemuCertDir)
                 .TlsCredsX509("tls-qmp",    certStore.QemuCertDir)
                 .TlsCredsX509("tls-qga",    certStore.QemuCertDir)
@@ -121,41 +200,72 @@ public sealed class BuildOperation(
                 .QmpOnChardev("qmp0")
                 .VirtioSerialDevice().QgaVirtioPort("qga0");
 
-            // 6. Boot. The process ends with Serpy, so no orphan can hold the staging disk (KTD4).
+            // 9. Boot. The process ends with Serpy, so no orphan can hold the staging disk (KTD4).
             Report("provision", "Booting provisioning VM…", 25);
-            await using var proc = QemuProcess.Start(
-                runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
+            var qemuExe = runtimeResolver?.QemuSystemExe ?? "qemu-system-x86_64";
+            await using var proc = startProcess is not null
+                ? startProcess(qemuExe, args.Args, logPath, log, true)
+                : QemuProcess.Start(
+                    qemuExe, args.Args, logPath, log, endWithSerpy: true);
 
-            // 7. Watch the guest console. The monitor fails fast on a failure line, a closed
-            //    console, a QEMU exit or a guest that never starts (KTD2).
+            // 10. Watch the guest console. The monitor fails fast on a failure line, a closed
+            //     console, a QEMU exit or a guest that never starts (KTD2).
             Report("provision", "Starting the installation inside the virtual computer…", 30);
-            await using var serial = await SerialClient.ConnectAsync(
-                "127.0.0.1", serialPort, clientCert, caCert, ct);
-
-            var monitor = new ProvisionMonitor(ProvisionStartWindow, ProvisionQuietTime, ProvisionTimeout);
-            monitor.LineReceived += line =>
+            IAsyncEnumerable<string> lineStream;
+            IAsyncDisposable? serialDisposable = null;
+            if (connectSerialLines is not null)
             {
-                log.Guest(line);
-                progress.Report(new OperationUpdate(operationId, opKind, "provision",
-                    UpdateSeverity.Info, line, null, line + "\n"));
-            };
-            monitor.StageChanged += stage => Report("provision", $"Installation step: {stage}", null);
-            monitor.Stuck += () => log.Info("No output from the guest for " + ProvisionQuietTime.TotalMinutes + " minutes; still waiting.");
-
-            var outcome = await monitor.WaitAsync(serial.ReadLines(ct), proc.Exited, ct);
-            if (outcome.Code == FailureCode.Cancelled) ct.ThrowIfCancellationRequested();
-            if (!outcome.Succeeded)
+                lineStream = await connectSerialLines(serialPort, clientCert, caCert, ct);
+            }
+            else
             {
-                await KillAndClean(proc, ct);
-                return Fail(operationId, opKind, outcome.Message, logPath, outcome.Code);
+                var serial = await SerialClient.ConnectAsync(
+                    "127.0.0.1", serialPort, clientCert, caCert, ct);
+                serialDisposable = serial;
+                lineStream = serial.ReadLines(ct);
             }
 
-            // 8. QGA version gate (R9)
-            Report("version-gate", "Querying installed versions…", 85);
-            await using var qga = await QgaClient.ConnectAsync(
-                "127.0.0.1", qgaPort, clientCert, caCert, ct);
+            try
+            {
+                var monitor = new ProvisionMonitor(ProvisionStartWindow, ProvisionQuietTime, ProvisionTimeout);
+                monitor.LineReceived += line =>
+                {
+                    log.Guest(line);
+                    progress.Report(new OperationUpdate(operationId, opKind, "provision",
+                        UpdateSeverity.Info, line, null, line + "\n"));
+                };
+                monitor.StageChanged += stage => Report("provision", $"Installation step: {stage}", null);
+                monitor.Stuck += () => log.Info("No output from the guest for " + ProvisionQuietTime.TotalMinutes + " minutes; still waiting.");
 
-            var versions = await QueryVersionsAsync(qga, ct);
+                var outcome = await monitor.WaitAsync(lineStream, proc.Exited, ct);
+                if (outcome.Code == FailureCode.Cancelled) ct.ThrowIfCancellationRequested();
+                if (!outcome.Succeeded)
+                {
+                    await KillAndClean(proc, ct);
+                    RemoveStaging();
+                    return Fail(operationId, opKind, outcome.Message, logPath, outcome.Code);
+                }
+            }
+            finally
+            {
+                if (serialDisposable is not null)
+                    await serialDisposable.DisposeAsync();
+            }
+
+            // 11. QGA version gate (R9)
+            Report("version-gate", "Querying installed versions…", 85);
+            GuestVersionReport versions;
+            if (queryVersions is not null)
+            {
+                versions = await queryVersions(qgaPort, clientCert, caCert, ct);
+            }
+            else
+            {
+                await using var qga = await QgaClient.ConnectAsync(
+                    "127.0.0.1", qgaPort, clientCert, caCert, ct);
+                versions = await QueryVersionsAsync(qga, ct);
+            }
+
             Report("version-gate",
                 $"python={versions.Python} node={versions.Node} " +
                 $"mariadb={versions.MariaDb} redis={versions.Redis} " +
@@ -171,12 +281,19 @@ public sealed class BuildOperation(
                     $"locked={ex.Locked} floor={ex.Floor}", logPath, FailureCode.ProvisioningFailed);
             }
 
-            // 9. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
-            await using var qmp = await QmpClient.ConnectAsync(
-                "127.0.0.1", qmpPort, clientCert, caCert, ct);
-            await qmp.SendPowerdownAsync(ct);
-            if (!await qmp.WaitForShutdownEventAsync(TimeSpan.FromMinutes(3), ct))
-                proc.Kill();
+            // 12. Cloud-init keeps the VM running; the host owns its authenticated shutdown.
+            if (sendPowerdown is not null)
+            {
+                await sendPowerdown(qmpPort, clientCert, caCert, ct);
+            }
+            else
+            {
+                await using var qmp = await QmpClient.ConnectAsync(
+                    "127.0.0.1", qmpPort, clientCert, caCert, ct);
+                await qmp.SendPowerdownAsync(ct);
+                if (!await qmp.WaitForShutdownEventAsync(TimeSpan.FromMinutes(3), ct))
+                    proc.Kill();
+            }
             if (!await proc.WaitForExitAsync(TimeSpan.FromMinutes(2), ct))
                 proc.Kill();
 
@@ -222,6 +339,12 @@ public sealed class BuildOperation(
             RemoveStaging();
             return Fail(operationId, opKind, $"Build failed: {ex.Message}", logPath, ClassifyFailure(ex));
         }
+        finally
+        {
+            CacheTransport.Delete(TransportTarPath);
+            DeleteIfPresent(ScratchDiskPath);
+            DeleteIfPresent(SeedIsoPath);
+        }
     }
 
     /// <summary>
@@ -253,6 +376,33 @@ public sealed class BuildOperation(
         });
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static BuildInputs TryLoadBuildInputs()
+    {
+        try { return BuildInputsLoader.Load(); }
+        catch { return new BuildInputs(); }
+    }
+
+    private static long GetAvailableFreeSpace(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(path)) ?? path;
+            return new DriveInfo(root).AvailableFreeSpace;
+        }
+        catch
+        {
+            return long.MaxValue;
+        }
+    }
+
+    private static void DeleteIfPresent(string path)
+    {
+        if (File.Exists(path))
+        {
+            try { File.Delete(path); } catch { }
+        }
+    }
 
     private static async Task<GuestVersionReport> QueryVersionsAsync(
         QgaClient qga, CancellationToken ct)
@@ -307,6 +457,8 @@ public sealed class BuildOperation(
         {
             switch (e)
             {
+                case CacheTransportChecksumMismatchException:
+                    return FailureCode.ChecksumMismatch;
                 case HttpRequestException:
                     return FailureCode.NetworkUnavailable;
                 case IOException io when io.HResult == unchecked((int)0x80070070):

@@ -117,6 +117,43 @@ public sealed class QemuArgumentsTests
         Assert.Contains("-nographic", args.Args);
     }
 
+    [Fact]
+    public void TransportDisk_SetsReadOnlyRawWithSerpyCacheSerial()
+    {
+        var args = new QemuArguments().TransportDisk("C:\\cache-transport.tar").Args;
+        AssertContainsSequence(args, "-drive", "file=C:\\cache-transport.tar,format=raw,if=virtio,readonly=on,serial=serpycache");
+    }
+
+    [Fact]
+    public void ScratchDisk_SetsRawWithSerpyScratchSerial()
+    {
+        var args = new QemuArguments().ScratchDisk("C:\\scratch.raw").Args;
+        AssertContainsSequence(args, "-drive", "file=C:\\scratch.raw,format=raw,if=virtio,serial=serpyscratch");
+    }
+
+    [Fact]
+    public void UserNetRestricted_SetsRestrictOnAndPortForward()
+    {
+        var args = new QemuArguments().UserNetRestricted(8080).Args;
+        AssertContainsSequence(args, "-netdev", "user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:8080-:80");
+        AssertContainsSequence(args, "-device", "virtio-net-pci,netdev=net0");
+    }
+
+    [Fact]
+    public void BuildArguments_ContainRestrictedNet_TransportDisk_AndScratchDisk()
+    {
+        var args = new QemuArguments()
+            .SystemDisk("staging.qcow2")
+            .Cdrom("seed.iso")
+            .TransportDisk("transport.tar")
+            .ScratchDisk("scratch.raw")
+            .UserNetRestricted(8080);
+
+        Assert.Contains(args.Args, a => a.Contains("restrict=on", StringComparison.Ordinal));
+        Assert.Contains(args.Args, a => a.Contains("serial=serpycache", StringComparison.Ordinal) && a.Contains("readonly=on", StringComparison.Ordinal));
+        Assert.Contains(args.Args, a => a.Contains("serial=serpyscratch", StringComparison.Ordinal));
+    }
+
     private static void AssertContainsSequence(IReadOnlyList<string> args, string a, string b)
     {
         for (int i = 0; i < args.Count - 1; i++)

@@ -68,7 +68,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         }
         _buildOp   = new BuildOperation(
             imageDownloader, seedWriter, imageTool,
-            runtimeResolver, certStore, stateStore, manifest, settings);
+            runtimeResolver, certStore, stateStore, manifest, settings,
+            buildInputs, downloadCache);
         _initOp    = new InitializeOperation(
             imageTool, runtimeResolver, certStore,
             healthCredentials, stateStore, settings);

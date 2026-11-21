@@ -48,6 +48,20 @@ public sealed class QemuArguments
     public QemuArguments Cdrom(string isoPath) =>
         Add("-drive", $"file={isoPath},media=cdrom,readonly=on");
 
+    /// <summary>
+    /// Read-only raw transport disk carrying the offline cache tar into the guest (KTD29).
+    /// Serial 'serpycache' allows guest udev to locate it at /dev/disk/by-id/virtio-serpycache.
+    /// </summary>
+    public QemuArguments TransportDisk(string imagePath) =>
+        Add("-drive", $"file={imagePath},format=raw,if=virtio,readonly=on,serial=serpycache");
+
+    /// <summary>
+    /// Writable raw scratch disk mounted by the guest at /srv to unpack the cache (KTD29).
+    /// Serial 'serpyscratch' allows guest udev to locate it at /dev/disk/by-id/virtio-serpyscratch.
+    /// </summary>
+    public QemuArguments ScratchDisk(string imagePath) =>
+        Add("-drive", $"file={imagePath},format=raw,if=virtio,serial=serpyscratch");
+
     // ── Network ──────────────────────────────────────────────────────────
     /// <summary>
     /// QEMU user-mode NAT: forward host:<paramref name="hostPort"/> → guest :80 (nginx).

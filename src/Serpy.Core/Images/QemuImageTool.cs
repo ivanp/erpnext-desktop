@@ -7,13 +7,13 @@ namespace Serpy.Core.Images;
 /// Managed wrapper around qemu-img.
 /// All image management calls go through here — no ad-hoc process spawning.
 /// </summary>
-public sealed class QemuImageTool(string qemuImgExe)
+public class QemuImageTool(string qemuImgExe)
 {
     /// <summary>
     /// Create a copy of <paramref name="sourcePath"/> as <paramref name="destPath"/> in qcow2 format.
     /// Used to make a working copy of the base Debian image.
     /// </summary>
-    public async Task CreateCopyAsync(
+    public virtual async Task CreateCopyAsync(
         string sourcePath,
         string destPath,
         CancellationToken ct = default) =>
@@ -24,14 +24,14 @@ public sealed class QemuImageTool(string qemuImgExe)
     /// the guest has passed its health gate and shut down cleanly; failed runs delete the overlay
     /// instead, preserving the accepted system image.
     /// </summary>
-    public async Task CommitAsync(string overlayPath, CancellationToken ct = default) =>
+    public virtual async Task CommitAsync(string overlayPath, CancellationToken ct = default) =>
         await RunAsync(["commit", overlayPath], ct);
 
     /// <summary>
     /// Create a fresh sparse RAW image of <paramref name="sizeGb"/> GiB.
     /// Used for data.img creation.
     /// </summary>
-    public async Task CreateSparseRawAsync(
+    public virtual async Task CreateSparseRawAsync(
         string destPath,
         int sizeGb,
         CancellationToken ct = default) =>
@@ -40,7 +40,7 @@ public sealed class QemuImageTool(string qemuImgExe)
     /// <summary>
     /// Resize an image to <paramref name="sizeGb"/> GiB.
     /// </summary>
-    public async Task ResizeAsync(
+    public virtual async Task ResizeAsync(
         string imagePath,
         int sizeGb,
         CancellationToken ct = default) =>
@@ -50,7 +50,7 @@ public sealed class QemuImageTool(string qemuImgExe)
     /// Return the backing_file field from qcow2 info, or null if not set.
     /// Used by recover to reject images with an arbitrary backing chain.
     /// </summary>
-    public async Task<string?> GetBackingFileAsync(
+    public virtual async Task<string?> GetBackingFileAsync(
         string imagePath,
         CancellationToken ct = default)
     {

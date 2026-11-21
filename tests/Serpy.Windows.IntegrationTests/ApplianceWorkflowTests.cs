@@ -390,3 +390,69 @@ public sealed class DurabilityTests(ApplianceWorkflowFixture fx)
     private static IProgress<OperationUpdate> NoProgress() =>
         new Progress<OperationUpdate>(u => Console.WriteLine($"[{u.Stage}] {u.Message}"));
 }
+
+// ── AE9 & AE10: Offline build and locked version gate ─────────────────────────
+
+/// <summary>
+/// AE9: With all inputs downloaded, the build and first start complete with network restricted.
+/// AE10: The version gate reports the locked version of every component.
+///
+/// Opt-in: SERPY_RUN_APPLIANCE=1 on a WHPX-enabled Windows machine with cached build inputs.
+/// </summary>
+[Collection(nameof(ApplianceWorkflow))]
+public sealed class OfflineBuildWorkflowTests(ApplianceWorkflowFixture fx)
+{
+    private static bool ShouldRun =>
+        Environment.GetEnvironmentVariable("SERPY_RUN_APPLIANCE") == "1";
+
+    [Fact]
+    public async Task AE9_OfflineBuildAndFirstStart_Complete()
+    {
+        if (!ShouldRun)
+        {
+            Console.WriteLine(
+                "SKIP AE9_OfflineBuildAndFirstStart_Complete: set SERPY_RUN_APPLIANCE=1 " +
+                "on a provisioned Windows WHPX machine.");
+            return;
+        }
+
+        var progress = new Progress<OperationUpdate>(u => Console.WriteLine($"[{u.Stage}] {u.Message}"));
+        var ct = new CancellationTokenSource(TimeSpan.FromHours(2)).Token;
+
+        var buildResult = await fx.Service.BuildAsync(progress, ct);
+        Assert.Equal(OperationOutcome.Success, buildResult.Outcome);
+
+        var startResult = await fx.Service.StartAsync(progress, ct);
+        Assert.Equal(OperationOutcome.Success, startResult.Outcome);
+
+        var status = await fx.Service.GetStatusAsync(ct);
+        Assert.Equal(HealthState.Running, status.Health);
+    }
+
+    [Fact]
+    public void AE10_VersionGate_ReportsLockedVersionOfEveryComponent()
+    {
+        if (!ShouldRun)
+        {
+            Console.WriteLine(
+                "SKIP AE10_VersionGate_ReportsLockedVersionOfEveryComponent: set SERPY_RUN_APPLIANCE=1 " +
+                "on a provisioned Windows WHPX machine.");
+            return;
+        }
+
+        var manifestPath = Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName);
+        Assert.True(File.Exists(manifestPath), $"System image manifest not found at {manifestPath}");
+
+        var manifest = VersionManifestLoader.Load();
+        var manifestText = File.ReadAllText(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(manifestText);
+        var versions = doc.RootElement.GetProperty("versions");
+
+        Assert.Equal(manifest.Runtime.Python.Lock, versions.GetProperty("python").GetString());
+        Assert.Equal(manifest.Runtime.Node.Lock, versions.GetProperty("node").GetString());
+        Assert.Equal(manifest.Runtime.MariaDb.Lock, versions.GetProperty("mariadb").GetString());
+        Assert.Equal(manifest.Runtime.Redis.Lock, versions.GetProperty("redis").GetString());
+        Assert.Equal(manifest.Apps.Frappe.Lock, versions.GetProperty("frappe").GetString());
+        Assert.Equal(manifest.Apps.ErpNext.Lock, versions.GetProperty("erpnext").GetString());
+    }
+}

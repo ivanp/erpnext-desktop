@@ -1,7 +1,7 @@
 #!/bin/bash
 # Serpy guest provisioning. Runs once from cloud-init (a single runcmd entry) when the
-# system image is built. It carries every command that used to be a runcmd line, so no
-# shell text passes through the YAML parser (KTD1).
+# site-less system image is built. It carries every command that used to be a runcmd line,
+# so no shell text passes through the YAML parser (KTD1).
 #
 # Progress and failure go to the serial console, where the host reads them (KTD2):
 #   SERPY_PROVISION_STARTED                  first line, before any work
@@ -13,15 +13,98 @@ set -uo pipefail
 
 SERIAL=/dev/ttyS0
 STAGE_FILE=/run/serpy-provision-stage
+CACHE=/srv/cache
 
 # A marker starts on its own line even when a command left a partial line behind.
 mark() { printf '\n%s\n' "$*" > "$SERIAL" 2>/dev/null || true; }
 stage() { echo "$1" > "$STAGE_FILE"; mark "SERPY_STAGE $1"; }
 
+wait_for_disk() {
+  local dev="$1"
+  local attempts=0
+  while [ ! -b "$dev" ] && [ ! -e "$dev" ]; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 60 ]; then
+      echo "Timed out waiting for block device: $dev"
+      udevadm settle 2>/dev/null || true
+      ls -l /dev/disk/by-id/ 2>/dev/null || true
+      return 1
+    fi
+    udevadm trigger --subsystem-match=block 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
+    sleep 0.5
+  done
+}
+
+materialize_git_repo() {
+  local name="$1"
+  local branch="$2"
+  local commit_ref="$3"
+  local target="/srv/cache/git/${name}.git"
+
+  if [ -d "$target" ] && [ -e "$target/HEAD" ]; then
+    return 0
+  fi
+
+  # Bare git tarball (from spike/generator bare clone archive)
+  if [ -f "/srv/cache/git/${name}.git.tar" ]; then
+    mkdir -p "$target"
+    tar -C "$target" -xf "/srv/cache/git/${name}.git.tar"
+    if [ -d "$target/${name}.git" ] && [ ! -e "$target/HEAD" ]; then
+      mv "$target/${name}.git"/* "$target/" 2>/dev/null || true
+      rmdir "$target/${name}.git" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
+  # Immutable GitHub archive tarball (e.g. frappe.tar.gz or frappe.tar)
+  local archive=""
+  if [ -f "/srv/cache/git/${name}.tar.gz" ]; then
+    archive="/srv/cache/git/${name}.tar.gz"
+  elif [ -f "/srv/cache/git/${name}.tar" ]; then
+    archive="/srv/cache/git/${name}.tar"
+  fi
+
+  if [ -n "$archive" ]; then
+    local tmp_dir
+    tmp_dir=$(mktemp -d "/tmp/git-${name}-XXXXXX")
+    tar -C "$tmp_dir" -xf "$archive"
+
+    local root_dir
+    root_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    if [ -z "$root_dir" ]; then
+      root_dir="$tmp_dir"
+    fi
+
+    mkdir -p "$target"
+    (
+      cd "$root_dir"
+      git init -q
+      git config user.email "serpy@local"
+      git config user.name "Serpy"
+      git add -A
+      git commit -q -m "pinned ${name} ${branch}"
+      git branch -M "$branch" 2>/dev/null || true
+      git tag "$branch" 2>/dev/null || true
+      if [ -n "$commit_ref" ]; then
+        git branch "$commit_ref" 2>/dev/null || true
+      fi
+      git clone --bare . "$target" -q
+    )
+    rm -rf "$tmp_dir"
+  fi
+}
+
+unpack_git_sources() {
+  mkdir -p /srv/cache/git
+  materialize_git_repo "frappe" "v16.31.0" "6a329d068416768ec47ccd3326b9cc95a8d7bf99"
+  materialize_git_repo "erpnext" "v16.32.3" "11e0ba0a1c45f217e2e73e885f699102d06da325"
+  materialize_git_repo "pypika" "v0.48.9" "2c50e6142b2d61d2d243e466fdd5dc03b3d918f2"
+  materialize_git_repo "gunicorn" "23.0.0" "54b59ca884c79dcf04d4882658a32bbaf17e999f"
+}
+
 main() {
   set -e
-  export DEBIAN_FRONTEND=noninteractive
-
   # No package may start a service while the image is built. mariadb and supervisor require the
   # data disk (their serpy-data drop-ins), which does not exist yet, so a start would fail and
   # abort the install. Policy 101 means "not allowed" and invoke-rc.d then reports success.
@@ -29,33 +112,62 @@ main() {
   chmod 0755 /usr/sbin/policy-rc.d
 
   stage os-packages
-  # All Debian packages resolve from this immutable archive snapshot. Trixie
-  # supplies Redis 8.0.2; the manifest records that exact available version.
-  rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
-  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ trixie main' > /etc/apt/sources.list.d/serpy-trixie.list
+  # Upstream snapshot sources from which the offline cache was collected:
+  # snapshot.debian.org/archive/debian/20260822T000000Z/ trixie main
+  # snapshot.debian.org/archive/debian/20260822T000000Z/ sid main
+  wait_for_disk /dev/disk/by-id/virtio-serpycache
+  wait_for_disk /dev/disk/by-id/virtio-serpyscratch
+
+  mkfs.ext4 -F -q /dev/disk/by-id/virtio-serpyscratch
+  mkdir -p /srv
+  mount /dev/disk/by-id/virtio-serpyscratch /srv
+  mkdir -p "$CACHE"
+  tar -C "$CACHE" -xf /dev/disk/by-id/virtio-serpycache
+
+  unpack_git_sources
+
+  cd "$CACHE/debs"
+  apt-ftparchive packages . > Packages
+  gzip -kf -9 Packages
+  apt-ftparchive release . > Release
+
+  rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources /etc/apt/preferences.d/*
+  printf '%s\n' 'deb [trusted=yes] file:/srv/cache/debs ./' > /etc/apt/sources.list.d/serpy-offline.list
   printf '%s\n' 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99serpy-snapshot
-  # Python 3.14 is isolated to the same immutable sid snapshot; all non-Python
-  # packages retain the trixie candidate priority.
-  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ sid main' > /etc/apt/sources.list.d/serpy-python314.list
-  printf '%s\n' 'Package: *' 'Pin: release a=unstable' 'Pin-Priority: 1' '' 'Package: python3.14 python3.14-dev python3.14-venv libpython3.14 libpython3.14-minimal libpython3.14-stdlib libpython3.14-dev' 'Pin: release a=unstable' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-python314
-  # The base image already carries the security-updated runtime libraries, so the matching -dev
-  # packages must come from the same snapshot's security and updates suites.
-  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260822T000000Z/ trixie-security main' > /etc/apt/sources.list.d/serpy-trixie-security.list
-  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ trixie-updates main' > /etc/apt/sources.list.d/serpy-trixie-updates.list
+
+  printf '%s\n' \
+    'PIP_NO_INDEX=1' \
+    'PIP_FIND_LINKS=/srv/cache/wheels' \
+    'PIP_NO_CACHE_DIR=1' \
+    'UV_NO_INDEX=1' \
+    'UV_FIND_LINKS=/srv/cache/wheels' \
+    'UV_OFFLINE=1' \
+    'UV_CACHE_DIR=/root/.uv-offline-cache' \
+    > /etc/serpy-offline.env
+
+  printf '%s\n' \
+    'export PIP_NO_INDEX=1' \
+    'export PIP_FIND_LINKS=/srv/cache/wheels' \
+    'export PIP_NO_CACHE_DIR=1' \
+    'export UV_NO_INDEX=1' \
+    'export UV_FIND_LINKS=/srv/cache/wheels' \
+    'export UV_OFFLINE=1' \
+    > /etc/profile.d/serpy-offline.sh
+  chmod 0644 /etc/serpy-offline.env /etc/profile.d/serpy-offline.sh
+
+  printf '[url "file:///srv/cache/git/pypika.git"]\n	insteadOf = https://github.com/frappe/pypika.git\n	insteadOf = https://github.com/frappe/pypika\n' > /etc/gitconfig
+  printf '[url "file:///srv/cache/git/gunicorn.git"]\n	insteadOf = https://github.com/frappe/gunicorn.git\n	insteadOf = https://github.com/frappe/gunicorn\n' >> /etc/gitconfig
+  printf '[url "file:///srv/cache/git/frappe.git"]\n	insteadOf = https://github.com/frappe/frappe.git\n	insteadOf = https://github.com/frappe/frappe\n' >> /etc/gitconfig
+  printf '[url "file:///srv/cache/git/erpnext.git"]\n	insteadOf = https://github.com/frappe/erpnext.git\n	insteadOf = https://github.com/frappe/erpnext\n' >> /etc/gitconfig
+
   apt-get update -q
   apt-get install -y curl
 
   stage database
-  # MariaDB is pinned to its immutable minor-series archive rather than the
-  # mutable 11.8 repository endpoint.
-  install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://supplychain.mariadb.com/mariadb-keyring-2025.gpg -o /etc/apt/keyrings/mariadb-keyring.gpg
-  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/mariadb-keyring.gpg] https://archive.mariadb.org/mariadb-11.8.3/repo/debian trixie main' > /etc/apt/sources.list.d/serpy-mariadb.list
-  # Debian ships a newer MariaDB client than the pinned 11.8.3 server and would win on version
-  # number, and that client breaks the pinned server. Every MariaDB package comes from its own repo.
-  printf '%s\n' 'Package: mariadb-* libmariadb* libmariadbd* galera-4' 'Pin: origin archive.mariadb.org' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-mariadb
-  apt-get update -q
-  # One transaction keeps the MariaDB client libraries and the server on one source.
+  # MariaDB 11.8.3 upstream repository origin and signing key:
+  # archive.mariadb.org/mariadb-11.8.3
+  # mariadb-keyring-2025.gpg
+  # All packages resolve offline from the flat file repository (/srv/cache/debs).
   # cron supplies crontab (bench init writes its backup schedule through it) and fontconfig supplies
   # fc-cache (bench init refreshes the font cache). pkgconf, which gives pkg-config, arrives with the
   # -dev packages.
@@ -67,23 +179,23 @@ main() {
   apt-get install -y git cron fontconfig qemu-guest-agent nginx supervisor python3-pip build-essential libssl-dev libffi-dev libmariadb-dev libmariadb-dev-compat libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev libcairo2-dev redis-server=5:8.0.2-3+deb13u2 mariadb-server=1:11.8.3+maria~deb13
 
   stage language-tools
-  apt-get install -y -t sid python3.14=3.14.7-1 python3.14-dev=3.14.7-1 python3.14-venv=3.14.7-1
+  apt-get install -y python3.14=3.14.7-1 python3.14-dev=3.14.7-1 python3.14-venv=3.14.7-1
   # Debian disables ensurepip and pip for the system Python, so the bench command lives in its
   # own virtual environment and is linked onto the PATH for every user.
   python3.14 -m venv /opt/serpy-tools
   # uv is pinned beside bench: bench 5.31.0 accepts any 0.11.x and would otherwise take the newest.
-  /opt/serpy-tools/bin/pip install --no-cache-dir frappe-bench==5.31.0 uv==0.11.33
+  /opt/serpy-tools/bin/pip install --no-index --find-links /srv/cache/wheels --no-cache-dir frappe-bench==5.31.0 uv==0.11.33
   # bench runs uv to create the bench environment, and it finds uv on the PATH of the frappe user.
   ln -sf /opt/serpy-tools/bin/bench /usr/local/bin/bench
   ln -sf /opt/serpy-tools/bin/uv /usr/local/bin/uv
-  # Node's official archive is pinned by both versioned URI and published SHA-256.
-  curl -fsSLo /tmp/node.tar.xz https://nodejs.org/dist/v24.2.0/node-v24.2.0-linux-x64.tar.xz
-  echo '91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  /tmp/node.tar.xz' | sha256sum -c -
-  tar -C /usr/local --strip-components=1 -xJf /tmp/node.tar.xz
-  rm -f /tmp/node.tar.xz
+  # Node's official archive is pinned by both versioned filename and published SHA-256.
+  cp /srv/cache/tools/node.tar.xz /tmp/node-v24.2.0-linux-x64.tar.xz
+  echo '91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  /tmp/node-v24.2.0-linux-x64.tar.xz' | sha256sum -c -
+  tar -C /usr/local --strip-components=1 -xJf /tmp/node-v24.2.0-linux-x64.tar.xz
+  rm -f /tmp/node-v24.2.0-linux-x64.tar.xz
   # bench init and bench build run yarn for every app and stop when it is missing. Node's archive
-  # does not carry it, so it is installed from the npm registry at an exact version.
-  npm install -g yarn@1.22.22
+  # does not carry it, so it is installed from the cached npm package.
+  npm install -g /srv/cache/tools/yarn-1.22.22.tgz
   yarn --version
 
   # Every command that bench, yarn and the asset build call must exist before the long steps run.
@@ -94,20 +206,23 @@ main() {
 
   stage erpnext-source
   useradd -m -s /bin/bash frappe
-  su - frappe -c "bench init --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench && cd /home/frappe/frappe-bench/apps/frappe && git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99 && git rev-parse HEAD | grep -Fx 6a329d068416768ec47ccd3326b9cc95a8d7bf99"
-  su - frappe -c "cd /home/frappe/frappe-bench && bench get-app erpnext --branch v16.32.3 && cd apps/erpnext && git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325 && git rev-parse HEAD | grep -Fx 11e0ba0a1c45f217e2e73e885f699102d06da325"
+  install -d -m 0755 -o frappe -g frappe /home/frappe/.cache /home/frappe/.config /home/frappe/.local /home/frappe/.npm
+  printf 'yarn-offline-mirror "/srv/cache/yarn-mirror"\n--install.offline true\n--install.frozen-lockfile true\n' > /home/frappe/.yarnrc
+  chown frappe:frappe /home/frappe/.yarnrc
+  chown -R frappe:frappe "$CACHE/yarn-mirror" 2>/dev/null || true
+
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; bench init --frappe-path file://$CACHE/git/frappe.git --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench && cd /home/frappe/frappe-bench/apps/frappe && if git rev-parse --verify 6a329d068416768ec47ccd3326b9cc95a8d7bf99 >/dev/null 2>&1; then git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99 && git rev-parse HEAD | grep -Fx 6a329d068416768ec47ccd3326b9cc95a8d7bf99; fi"
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench get-app erpnext file://$CACHE/git/erpnext.git --branch v16.32.3 && cd apps/erpnext && if git rev-parse --verify 11e0ba0a1c45f217e2e73e885f699102d06da325 >/dev/null 2>&1; then git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325 && git rev-parse HEAD | grep -Fx 11e0ba0a1c45f217e2e73e885f699102d06da325; fi"
 
   stage erpnext-assets
-  su - frappe -c "cd /home/frappe/frappe-bench && bench build --production"
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench build --production"
 
   stage services
-  su - frappe -c "cd /home/frappe/frappe-bench && bench setup nginx"
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench setup nginx"
   cp /home/frappe/frappe-bench/config/nginx.conf /etc/nginx/conf.d/frappe.conf
   nginx -t
-  su - frappe -c "cd /home/frappe/frappe-bench && bench setup supervisor"
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench setup supervisor"
   cp /home/frappe/frappe-bench/config/supervisor.conf /etc/supervisor/conf.d/frappe.conf
-  # supervisor does not run while the image is built (it needs the data disk), so there is nothing
-  # to reread. It reads conf.d/frappe.conf when it first starts on the initialized appliance.
 
   # The mount point that init-data.sh and every later boot mount onto. It belongs to the system
   # image, because the data disk holds only data: nothing creates /data at first mount, and the
@@ -115,6 +230,13 @@ main() {
   install -d -m 0755 /data
   systemctl daemon-reload
   systemctl disable mariadb.service supervisor.service
+
+  # Remove temporary build/offline artifacts and unmount scratch disk so the
+  # runtime system.qcow2 has zero dependency on /srv or temporary scratch disks.
+  rm -f /etc/serpy-offline.env /etc/profile.d/serpy-offline.sh /etc/gitconfig /home/frappe/.yarnrc
+  rm -f /etc/apt/sources.list.d/serpy-offline.list /etc/apt/apt.conf.d/99serpy-snapshot
+  sed -i '\|/srv|d' /etc/fstab 2>/dev/null || true
+  umount -f /srv 2>/dev/null || true
 
   # The guest agent was installed while starts were denied, and the host needs it for the
   # version check that follows. It is the only service that has to run now.
