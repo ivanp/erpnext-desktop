@@ -10,9 +10,9 @@ Authoritative plan: `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotn
 
 ## Status
 
-- U1–U5 complete: solution scaffold, managed QEMU/WHPX bundle + mTLS QMP/QGA, cloud-init build pipeline, persistent data init, lifecycle operations.
-- U6 in progress: Avalonia dashboard, tray, splash, `--tray` autostart, Run-key registration.
-- U7 pending: endurance verification, packaging, CI, operator docs.
+- U1–U12 of the easy-install plan are done and committed: provisioning script and fail-fast serial monitor, file lease, the resumable `SetupOperation` with PC check, one elevation and restart, company data step, setup and everyday views, tray states, toasts, second-launch handling, keep-awake, and the one-click MSI.
+- U14–U16 are implemented: the Pinned Input List loader, the parallel download engine and cache, and the offline guest build from a read-only cache disk. The Pinned Input List generator output and the restrict=on end-to-end build are NOT yet verified; see `docs/results.md`.
+- U17 (acceptance run, Welcome screen figures, final docs) is open.
 
 ## Architecture
 
@@ -27,18 +27,22 @@ Authoritative plan: `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotn
 Key source layout (`src/Serpy.Core/`):
 
 - `Contracts/` — `IApplianceService` (Build/Initialize/Start/Stop/Restart/Recover/Status), `ApplianceStatus`, `OperationResult`, `OperationUpdate`.
-- `Operations/` — `ApplianceService` (composition root, serializes mutations through `LifecycleLock`) plus one operation class per verb.
+- `Operations/` — `ApplianceService` (composition root, serializes mutations through `LifecycleLock`) plus one operation class per verb, and `SetupOperation`, which runs the ordered setup steps (`Setup/`) and is resumable.
+- `Setup/` — `ISetupStep` implementations (PC check, Prepare, Download, Build, Company data, Start), `DownloadHosts`, `PcCheck`.
+- `Downloads/` — `DownloadEngine` (4 parallel, 2 per snapshot host, backoff, URL fallback) and `DownloadCache` (content-addressed, verified once per run; Reset keeps it).
 - `Qemu/` — `AcceleratorPolicy` (table-driven WHPX/KVM/HVF), `QemuArguments`, `QemuProcess`, `ManagedRuntimeResolver` (SHA-verified bundle), `WhpxProbe`, `TlsCertificateStore`.
 - `Protocols/` — `QmpClient`, `QgaClient`, `SerialClient` (TCP loopback, mTLS).
-- `Images/` — `BaseImageDownloader`, `NoCloudSeedWriter`, `QemuImageTool`, `SystemImageManifest`.
-- `Versions/` — `VersionManifestLoader`, `VersionEvaluator`, `VersionGate` (R9 lock/floor checks).
+- `Images/` — `BaseImageDownloader` (thin engine caller), `CacheTransport` (tar of the pinned guest files), `NoCloudSeedWriter`, `QemuImageTool`, `SystemImageManifest`.
+- `Versions/` — `VersionManifestLoader`, `VersionEvaluator`, `VersionGate` (R9 lock/floor checks), `BuildInputs` and `BuildInputsLoader` (the Pinned Input List, `config/build-inputs.json`).
 - `Health/` — `HealthChecker`, `HealthCredentials` (R11 functional gate).
-- `Coordination/` — `LifecycleLock`, `StateStore`, `ApplianceState`, `ProcessIdentity`.
+- `Coordination/` — `LifecycleLock` (an exclusive file lease on `lifecycle.lock` under the settings folder, freed by the OS if the holder dies), `StateStore`, `ApplianceState`, `ProcessIdentity`.
 - `Configuration/` — `ApplianceSettings`, `KnownPaths`.
 
 ## Invariants (do not break)
 
 - **Lifecycle rules live in `Serpy.Core` only.** ViewModels must never spawn QEMU, write state, or parse QMP. All mutating operations serialize through `LifecycleLock`; status reads do not acquire it.
+- **Offline build.** The guest build installs only from the cache disk with the network restricted (`restrict=on`); the host deletes the transport and scratch disks on every exit path, and the shipped `system.qcow2` carries no offline wiring or `/srv` mount. Downloads happen on the host before the build, against the Pinned Input List.
+- **Download Cache.** Verified files live under `%LOCALAPPDATA%\Serpy\cache`; Reset never deletes it; a cached file is re-hashed before use and a mismatch is refetched once.
 - **Two-disk boundary.** MariaDB datadir and Frappe `sites/` (incl. `site_config.json` / `encryption_key`) must live physically on `data.img`; `system.qcow2` is disposable. `init` commits the final disk name only after the health gate passes and the guest halts cleanly.
 - **Recovery guards.** `recover` rejects MariaDB/Frappe/ERPNext downgrades before mutation; runs `mariadb-upgrade` only when needed, then `bench migrate`; a durable recovery journal blocks normal `start` until a compatible `recover` completes the health gate.
 - **Managed QEMU, no PATH dependency.** QEMU is SHA-verified and installed under `%LOCALAPPDATA%\Serpy\runtime`; never rely on QEMU on PATH.

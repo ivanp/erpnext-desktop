@@ -190,3 +190,7 @@ su - frappe -c "cd /home/frappe/frappe-bench/apps/erpnext/banking && rm -rf node
 4. **Pre-built CPython 3.14 wheels:** `mysqlclient==2.2.7` and `psutil==7.0.0` compile cleanly against `libmariadb-dev` in Python 3.14. Pre-building `.whl` files into `$CACHE/wheels` ensures offline `uv pip install` or `pip install` needs zero external build-time network access.
 5. **Yarn mirror permissions:** The mirror directory must be readable and writable by the `frappe` user (`chown -R frappe:frappe $CACHE/yarn-mirror`).
 6. **Git `insteadOf` configuration:** Setting `/etc/gitconfig` with `insteadOf` rewrites `https://github.com/frappe/pypika` and `gunicorn` to local `file:///srv/cache/git/` bare clones, so `pyproject.toml` git dependencies resolve offline without code changes.
+
+## Source pinning caveat
+
+Frappe, ERPNext, PyPika and gunicorn are pinned as GitHub commit archives (`archive/<commit>.tar.gz`) by SHA-256. A re-fetch of two of them returned the same hash on 2026-11-21, but GitHub does not guarantee archive bytes are stable over time. When one changes, the checksum check fails closed and the generator must be rerun. The guest builds a local git repository from the unpacked tree, so `git rev-parse HEAD` there is a new commit, not the upstream commit hash: the upstream commit is pinned by the archive URL and its SHA-256, not by a git hash comparison.

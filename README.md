@@ -16,7 +16,7 @@ Two-disk model:
 The source implements U1–U7 and deterministic verification. The Windows appliance build, initialization, persistence, recovery, and durability experiments are pending the opt-in acceptance run. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
 
 - Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; the per-user installer delivery path awaits a clean delivery-chain run.
-- Deterministic tests: `Serpy.Core.Tests` 156 pass, `Serpy.App.Tests` 47 pass.
+- Deterministic tests (2026-11-21): `Serpy.Core.Tests` 496 pass, `Serpy.App.Tests` 153 pass, `Serpy.InstallerBootstrapper.Tests` 20 pass.
 - Linux x64 and macOS x64 are compile/publish-checked extension targets, not runtime-delivered platforms.
 
 ## Prerequisites (Windows)
@@ -36,19 +36,18 @@ WHPX integration tests (`Serpy.Windows.IntegrationTests`) are opt-in and require
 
 ## Quick start (once packaged)
 
-1. Extract the Windows x64 distribution to a stable directory (e.g. `%LOCALAPPDATA%\Serpy`).
-2. Run `Serpy.App.exe`.
-3. **Build appliance** — downloads the Debian image, provisions ERPNext (~30–60 min, needs internet).
-4. **Initialize** — creates the persistent data disk and first site.
-5. **Start** — QEMU/WHPX starts; browser opens `http://127.0.0.1:18080`.
+1. Run the Serpy installer (MSI). It has one Install button and opens Serpy when it finishes.
+2. Click **Start setup**. Serpy checks the PC, asks Windows for permission once (to install the virtual-machine support), downloads what ERPNext needs, builds it and creates your company database. If Windows needs a restart, Serpy resumes after it.
+3. When setup finishes Serpy tells you ERPNext is ready; **Open ERPNext** opens `http://127.0.0.1:18080`.
+4. Downloaded files are kept in `%LOCALAPPDATA%\Serpy\cache` and are not downloaded again after a reset. The build itself runs without internet once the downloads have finished (verification of this restricted-network build is pending, see `docs/results.md`).
 
-6. **Recover system disk** — stop the appliance, click **Recover…**, select a Serpy-built `*.qcow2` replacement, then acknowledge the irreversible migration. The core rejects an unattested image, a backing-file chain, and MariaDB/Frappe/ERPNext downgrades before it replaces `system.qcow2`; `data.img` remains in place. Copy `data.img` yourself before a major replacement.
+**Recover system disk** — stop the appliance, click **Recover…**, select a Serpy-built `*.qcow2` replacement, then acknowledge the irreversible migration. The core rejects an unattested image, a backing-file chain, and MariaDB/Frappe/ERPNext downgrades before it replaces `system.qcow2`; `data.img` remains in place. Copy `data.img` yourself before a major replacement.
 
 ## Operations and local data
 
 - The dashboard is the only appliance control surface. Closing it hides it; use its tray icon to reopen it or exit.
 - **Start Serpy at sign-in** creates a per-user Run-key entry that launches tray-only. Keep the portable bundle in a trusted, stable directory; disabling the setting removes only Serpy’s registry value.
-- Operation logs and appliance data are stored under `%LOCALAPPDATA%\Serpy`: `logs\`, `appliance\`, `runtime\`, and `settings\`.
+- Operation logs and appliance data are stored under `%LOCALAPPDATA%\Serpy`: `logs\`, `appliance\`, `cache\`, `runtime\`, and `settings\`.
 - QEMU is managed under `%LOCALAPPDATA%\Serpy\runtime`; no host QEMU installation or PATH entry is used.
 
 ## Architecture
