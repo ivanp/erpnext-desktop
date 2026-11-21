@@ -1,6 +1,10 @@
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
 using Serpy.Core.Operations;
+using Serpy.Core.Configuration;
+using Serpy.Core.Health;
+using Serpy.Core.Qemu;
+using Serpy.Core.Versions;
 
 /// <summary>
 /// ApplianceService contract tests using a stub store — no QEMU.

@@ -42,6 +42,12 @@ public sealed class CompanyDataStepTests : IDisposable
         return creds;
     }
 
+    private static OperationResult Success(Guid id, OperationKind kind, string message) =>
+        new(id, kind, OperationOutcome.Success, message);
+
+    private static OperationResult Fail(Guid id, OperationKind kind, string message, FailureCode code) =>
+        new(id, kind, OperationOutcome.Failure, message, Code: code);
+
     private SetupContext MakeContext(bool journalOpen = false) => new()
     {
         RunId = Guid.NewGuid(),
@@ -73,7 +79,7 @@ public sealed class CompanyDataStepTests : IDisposable
             {
                 createdSite = site;
                 createdPassword = pwd;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
             });
 
         var context = MakeContext();
@@ -136,7 +142,7 @@ public sealed class CompanyDataStepTests : IDisposable
                 adoptExecuted = true;
                 passedPassword = param.AdminPassword;
                 legacyConsent = consent;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Adopt, "adopted"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Adopt, "adopted"));
             });
 
         var context = MakeContext();
@@ -169,7 +175,7 @@ public sealed class CompanyDataStepTests : IDisposable
             initializeWork: (_, _, _, _) =>
             {
                 initCalled = true;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
             });
 
         var context = MakeContext();
@@ -276,7 +282,7 @@ public sealed class CompanyDataStepTests : IDisposable
             adoptWork: (_, _, _, _) =>
             {
                 adopted = true;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Adopt, "ok"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Adopt, "ok"));
             });
 
         var context = MakeContext();
@@ -340,7 +346,7 @@ public sealed class CompanyDataStepTests : IDisposable
             adoptWork: (param, _, _, _) =>
             {
                 usedPassword = param.AdminPassword;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Adopt, "ok"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Adopt, "ok"));
             });
 
         var result = await step.RunAsync(MakeContext(), CancellationToken.None);
@@ -364,7 +370,7 @@ public sealed class CompanyDataStepTests : IDisposable
             healthCredentials: emptyCreds,
             applianceDir: () => _dir,
             adoptWork: (_, _, _, _) =>
-                Task.FromResult(OperationResult.Fail(Guid.NewGuid(), OperationKind.Adopt, "Incorrect password", FailureCode.PasswordRejected)));
+                Task.FromResult(Fail(Guid.NewGuid(), OperationKind.Adopt, "Incorrect password", FailureCode.PasswordRejected)));
 
         var result = await step.RunAsync(MakeContext(), CancellationToken.None);
 
@@ -390,7 +396,7 @@ public sealed class CompanyDataStepTests : IDisposable
             initializeWork: (_, _, _, _) =>
             {
                 initCalled = true;
-                return Task.FromResult(OperationResult.Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
+                return Task.FromResult(Success(Guid.NewGuid(), OperationKind.Initialize, "ok"));
             });
 
         var result = await step.RunAsync(MakeContext(), CancellationToken.None);
