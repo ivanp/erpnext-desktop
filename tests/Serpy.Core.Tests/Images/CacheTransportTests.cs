@@ -8,6 +8,7 @@ using Serpy.Core.Versions;
 
 namespace Serpy.Core.Tests.Images;
 
+[Collection("LifecycleLock")]
 public sealed class CacheTransportTests : IDisposable
 {
     private readonly string _tempDir;

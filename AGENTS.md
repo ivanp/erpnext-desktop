@@ -11,7 +11,7 @@ Authoritative plan: `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotn
 ## Status
 
 - U1–U16 of the easy-install plan are complete and committed: provisioning script and fail-fast serial monitor, file lease, the resumable `SetupOperation` with PC check, one elevation and restart, company data step, setup and everyday views, tray states, toasts, second-launch handling, keep-awake, the one-click MSI, the Pinned Input List generator and AOT loader, the parallel download engine and cache, and the offline guest build from a read-only cache disk under `restrict=on` (verified in 3.5 minutes with all 6 version gates passed).
-- U17 is open: clean install from the MSI, the second run downloading nothing, and the observed first-time user acceptance run are pending the opt-in acceptance run; see `docs/results.md`.
+- U17 is open: clean install from the MSI, the timed cold-cache Welcome-to-Ready run, and the observed first-time user run are pending; see `docs/results.md`. The Pinned Input List is verified by the offline build and first start, not by regeneration: `eng/lock/generate-build-inputs.sh` has not reproduced `config/build-inputs.json` (it failed on a stock `debian:trixie` here), so regenerating may not reproduce it until the `generate-build-inputs.yml` workflow is run and diffed. The Welcome screen keeps "about 1 hour" until the timed run exists.
 
 ## Architecture
 

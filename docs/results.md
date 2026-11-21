@@ -132,47 +132,64 @@ Before it downloads the Debian base image or starts QEMU, `BuildOperation` resol
 
 ## Offline build proof (U13, U16)
 
-*(Verified on 2026-11-21 inside Debian 13 QEMU/WHPX appliance under restricted network `restrict=on`)*
+*(Run 16, 2026-11-21, host build through `BuildOperation` with `restrict=on`; inputs from the download cache, packed into a transport disk.)*
 
-### Verdict: Passed
+### Verdict
 
-The offline provisioning pipeline (`BuildOperation`, `CacheTransport`, `guest/provision.sh`, `config/build-inputs.json`) built and verified the complete appliance runtime (Debian 13 + MariaDB 11.8 + Redis 8.0 + Frappe 16.31.0 + ERPNext 16.32.3) in 3.5 minutes (212 seconds) entirely from a local cache with `restrict=on` network isolation, satisfying R20 and KTD30.
+- **Proven:** the build half of R20. The guest built the full runtime from the cache with outbound network blocked and passed the six-component version gate. Total build time 212 s (3.5 min) on a warm cache. Evidence in `.artifacts/dev/proof/run16.log`.
+- **Not yet proven:** AE10 (two builds identical). It needs a second build to compare, and none has run.
 
-Direct in-guest assertions confirmed zero outbound WAN access:
-- `curl -m 5 https://deb.debian.org` failed with exit code 6 (Could not resolve host)
-- `getent hosts deb.debian.org` failed with exit code 2 (Host name lookup failure)
+### Restricted-network evidence (from the guest, run 16)
 
-All temporary disks (`.cache-transport.tar`, `.scratch.raw`, `.cloud-init-seed.iso`) were verified deleted on exit, leaving zero `/srv` dependency in the accepted `system.qcow2`.
-### 6-Component Version Gate (Verified In-Guest)
+- `curl -m 5 https://deb.debian.org` failed with exit code 6.
+- `getent hosts deb.debian.org` failed with exit code 2.
+- The `bench` asset step logged `Temporary failure in name resolution` for `github.com` and continued, as expected when the network is blocked.
 
-| Component | Expected Lock | Measured Offline | Gate Floor | Status |
-|---|---|---|---|---|
-| **Python** | `3.14.7` | `Python 3.14.7` | `3.14.0` | ✅ PASS |
-| **Node.js** | `24.2.0` | `v24.2.0` | `24.0.0` | ✅ PASS |
-| **MariaDB** | `11.8.3` | `11.8.3-MariaDB` | `11.8.0` | ✅ PASS |
-| **Redis** | `8.0.2` | `Redis server v=8.0.2` | `8.0.0` | ✅ PASS |
-| **Frappe** | `16.31.0` (`6a329d068416768ec47ccd3326b9cc95a8d7bf99`) | `frappe 16.31.0 HEAD (6a329d0)` | `16.0.0` | ✅ PASS |
-| **ERPNext** | `16.32.3` (`11e0ba0a1c45f217e2e73e885f699102d06da325`) | `erpnext 16.32.3 HEAD (11e0ba0)` | `16.0.0` | ✅ PASS |
+After the stage the host deleted `.cache-transport.tar`, `.scratch.raw` and `.cloud-init-seed.iso`. The accepted `system.qcow2` was written with `.system-accepted.json`.
 
-### Key Technical Findings & Deviations from Online Script
+### Version gate (run 16 output)
 
-1. **`apt-ftparchive` Availability in Base Image:**
-   `apt-ftparchive` (`/usr/bin/apt-ftparchive`) is pre-installed in `debian-13-genericcloud-amd64-20260819-2575.qcow2` as part of `apt-utils`. `dpkg-scanpackages` is missing. The base image can index local deb pools directly without shipping a pre-generated `Packages.gz` in git.
+The guest reported `python=3.14.7 node=24.2.0 mariadb=11.8.3 redis=8.0.2 frappe=16.31.0 erpnext=16.32.3`. These equal the locks in `config/versions.yaml`.
 
-2. **Single Flat Deb Repository:**
-   A single flat repository (`deb [trusted=yes] file:/srv/cache/debs ./`) contains all 244 required debs (Trixie packages, Sid Python 3.14, and MariaDB 11.8.3). Release pinning is unnecessary offline since the cache contains only the target versions.
+Frappe and ERPNext are pinned by the commit id inside their GitHub archives (`git get-tar-commit-id`) and by the archive SHA-256 in `config/build-inputs.json`. The guest repository `HEAD` is a commit synthesized locally from the archive, so it does not carry the upstream hash. Earlier "HEAD (6a329d0)" rows came from the collection VM and are not evidence for this build.
 
-3. **Drop `-t sid` Offline:**
-   `apt-get install -y -t sid python3.14=3.14.7-1 ...` fails in a flat file repo because flat repositories do not have release suite metadata. Dropping `-t sid` in the offline install (`apt-get install -y python3.14=3.14.7-1 ...`) succeeds unconditionally.
+### Deviations from upstream
 
-4. **Pre-built CPython 3.14 Wheels for C Extensions:**
-   `mysqlclient==2.2.7` and `psutil==7.0.0` build C extensions. Pre-building Linux x86_64 wheels (`mysqlclient-2.2.7-cp314-cp314-linux_x86_64.whl` and `psutil-7.0.0-cp36-abi3-manylinux...whl`) into the wheelhouse eliminates offline build-backend failures when pip/uv operates with `--no-index`.
+1. **`banking/yarn.lock`:** ERPNext 16.32.3 ships a lockfile for `banking/` that lacks entries for `follow-redirects@^1.16.0` and `proxy-from-env@^2.1.0`, which `axios@1.18.1` declares. `guest/provision.sh` appends the two entries, using the already-cached 1.16.3 and 2.1.0 tarballs, before the bare repository is created. Online, yarn resolves them silently; with a frozen offline lockfile it refuses.
+2. **`pdfplumber 0.11.10` with `pillow 12.2.0`**, and `flit_core 3.11.0`: pinned in the wheelhouse so the resolver does not need a version that is absent from the cache.
+3. **Synthesized git refs:** git sources are GitHub archives turned into bare repositories at build time. The branch and tag names, and a ref named with the commit sha, are created locally so `bench get-app --branch` and the `pyproject.toml` git pins resolve. `air-datepicker` is served this way too.
+4. **`pypika` and `gunicorn`:** pinned through `/etc/serpy-python-overrides.txt` (`UV_OVERRIDE`, `PIP_CONSTRAINT`) to local `file://` repositories; `pyproject.toml` is not edited.
 
-5. **Git pyproject URL Rewriting:**
-   Setting `[url "file:///srv/cache/git/<repo>.git"] insteadOf = https://github.com/frappe/<repo>` in `/etc/gitconfig` allows pip and uv to resolve git-pinned dependencies (`pypika`, `gunicorn`) from local bare mirrors without modifying `pyproject.toml`.
+### Mechanisms that made the offline build work
 
-6. **Yarn Offline Mirror:**
-   Configuring `yarn-offline-mirror "/srv/cache/yarn-mirror"` and `--install.offline true` in `/home/frappe/.yarnrc` allows `yarn install --frozen-lockfile` to install all 954 frontend packages across Frappe, ERPNext, and ERPNext Banking in under 16 seconds without network requests.
+1. **`apt-ftparchive` is in the base image** (`apt-utils`), so the guest indexes the deb pool itself. `dpkg-scanpackages` is absent.
+2. **One flat deb repository:** `deb [trusted=yes] file:/srv/cache/debs ./` holds all 244 debs (Trixie, Sid Python 3.14, MariaDB 11.8.3). Pinning is not needed because the pool holds only the target versions. Offline installs name exact versions without `-t sid`, which a flat repository cannot honour.
+3. **Pre-built CPython 3.14 wheels** for `mysqlclient` and `psutil` are in the wheelhouse, so `pip`/`uv` with `--no-index` never needs a build backend.
+4. **git `insteadOf` rewrites** in `/etc/gitconfig` send `github.com/frappe/*` to the local repositories. `safe.directory` entries are added for those paths. The rewrites are removed when the stage ends.
+5. **Yarn offline mirror:** `yarn-offline-mirror /srv/cache/yarn-mirror` with `--install.offline` installs all packages with no network.
+6. **Environment across `su - frappe`:** `su -` clears the environment, so the offline flags (`PIP_NO_INDEX`, `PIP_FIND_LINKS`, `UV_NO_INDEX`, `UV_FIND_LINKS`, `UV_OFFLINE`) are written to `/etc/profile.d/serpy-offline.sh` and `/etc/serpy-offline.env`.
 
-7. **Environment Inheritance Across `su - frappe`:**
-   `su - frappe` clears environment variables. Exporting offline flags in `/etc/profile.d/serpy-offline.sh` and `/etc/serpy-offline.env` ensures `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=/srv/cache/wheels`, `UV_NO_INDEX=1`, and `UV_FIND_LINKS=/srv/cache/wheels` persist across all child bench invocations.
+### First start on the run 16 image (2026-11-21)
+
+**Passed.** `PersistenceAcrossCleanRestart` ran from the Built state of the run 16 image, on port 18181 under an isolated app-data root. Log: `.artifacts/dev/proof/init-start.log`; per-operation logs under `.artifacts/dev/proof/logs`.
+
+| Step | Result |
+|---|---|
+| Initialize | Site `site1.local` initialized, `data.img` committed; 18:13:31 to 18:15:40 (about 2 min 10 s) |
+| First Start | Functional health gate passed; running 18:16:29 to 18:16:51 (22 s) |
+| Record written, clean stop, second Start | Record `pneqkve2g3` survived the clean restart |
+
+So nothing in the shipped image depends on the `/srv` mount, the `insteadOf` rewrites, `.yarnrc` or `/etc/serpy-offline.env` that the stage removes. This also covers the start half of AE9. It does not cover a cold-cache Welcome-to-Ready run or the MSI install.
+
+### Second run downloads nothing (engine level, 2026-11-21)
+
+With the populated proof cache and an HTTP handler that fails on every request, `DownloadEngine` made **0 requests** and reported every part `alreadyPresent` (6 parts, 1,373 files, 15 s to verify hashes). Scope: the six parts the engine downloads (`database`, `system-tools`, `language-tools`, `web-tools`, `framework`, `erpnext`). The `engine` (QEMU) and `os` (Debian base image) parts go through the installer and `BaseImageDownloader`, so this run does not show they hit the cache. The file counts it reported (language-tools 179, framework 4) differ from the generator README table (178 and 3); that is unresolved.
+
+### Pending: needs a person or a longer run
+
+| Item | Why it is not done |
+|---|---|
+| Generator output diffed against the committed `config/build-inputs.json` | `eng/lock/generate-build-inputs.sh` does not run on a stock `debian:trixie` image on this PC: the image carries packages newer than the 2026-08-22 snapshot, so the pinned `-dev` installs fail on exact-version dependencies. Four attempts (downgrade flags, pin priorities, clean distros) ended in a different dependency conflict each time (the last: `python3.14` needs `libc6 >= 2.42`). The committed list is verified by the offline build, not by regeneration; regenerating may not reproduce it. Next step is the `generate-build-inputs.yml` workflow in CI. |
+| Timed cold-cache Welcome-to-Ready run | Needs a real 1.3 GB download plus the full guided setup. The Welcome screen keeps "about 1 hour" until this is measured. |
+| Clean install from the MSI to the sign-in page | Needs the reference PC and a Windows elevation prompt. |
+| Observed first-time user install | Needs a person who has installed Office and never used Serpy. |

@@ -8,6 +8,7 @@ using Serpy.Core.Versions;
 
 namespace Serpy.Core.Tests.Downloads;
 
+[Collection("LifecycleLock")]
 public sealed class DownloadEngineTests : IDisposable
 {
     private readonly string _cacheDir = Path.Combine(Path.GetTempPath(), $"SerpyDlEngineTests-{Guid.NewGuid():N}");

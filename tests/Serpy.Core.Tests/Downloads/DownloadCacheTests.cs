@@ -5,6 +5,7 @@ using Serpy.Core.Versions;
 
 namespace Serpy.Core.Tests.Downloads;
 
+[Collection("LifecycleLock")]
 public sealed class DownloadCacheTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyCacheTests-{Guid.NewGuid():N}");
