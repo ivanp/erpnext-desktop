@@ -10,10 +10,12 @@ internal sealed class LoginRequest
     [JsonPropertyName("pwd")] public string Pwd { get; set; } = string.Empty;
 }
 
+// Frappe 16's ToDo has no subject field: its mandatory field is description. Posting a subject
+// answers 417 MandatoryError, so a healthy new site would fail the create step of the health gate.
 internal sealed class CreateToDoRequest
 {
-    [JsonPropertyName("subject")] public string Subject { get; set; } = string.Empty;
-    [JsonPropertyName("status")]  public string Status  { get; set; } = "Open";
+    [JsonPropertyName("description")] public string Description { get; set; } = string.Empty;
+    [JsonPropertyName("status")]      public string Status      { get; set; } = "Open";
 }
 
 internal sealed class FrappeDocResponse

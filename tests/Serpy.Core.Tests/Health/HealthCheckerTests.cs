@@ -97,6 +97,7 @@ public sealed class HealthCheckerSignInTests : IDisposable
     private sealed class FakeSite(System.Net.HttpStatusCode login) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
+        public List<string> PostedBodies { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -110,11 +111,23 @@ public sealed class HealthCheckerSignInTests : IDisposable
                 return Task.FromResult(response);
             }
 
+            // Frappe 16's ToDo has no subject field and requires description: a body without it is
+            // answered with 417 MandatoryError, measured on a real guest.
             if (request.Method == HttpMethod.Post && path == "/api/resource/ToDo")
+            {
+                var posted = request.Content!.ReadAsStringAsync(ct).GetAwaiter().GetResult();
+                lock (Requests) PostedBodies.Add(posted);
+                if (!posted.Contains("\"description\"", StringComparison.Ordinal))
+                    return Task.FromResult(new HttpResponseMessage((System.Net.HttpStatusCode)417)
+                    {
+                        Content = new StringContent("{\"exc_type\":\"MandatoryError\"}"),
+                    });
+
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
                     Content = new StringContent("{\"data\":{\"name\":\"todo-1\"}}"),
                 });
+            }
 
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
@@ -183,6 +196,19 @@ public sealed class HealthCheckerSignInTests : IDisposable
         Assert.False(result.IsPasswordRejected);
         Assert.Contains("POST /api/resource/ToDo", site.Requests);
         Assert.Contains("DELETE /api/resource/ToDo/todo-1", site.Requests);
+    }
+
+    [Fact]
+    public async Task TheProbeRecord_CarriesTheMandatoryDescription_ThatFrappe16Requires()
+    {
+        var site = new FakeSite(System.Net.HttpStatusCode.OK);
+
+        var result = await Checker(new FakeGuest(), site, Saved()).RunAsync();
+
+        Assert.True(result.Healthy, result.Reason);
+        var body = Assert.Single(site.PostedBodies);
+        Assert.Contains("\"description\":\"Serpy-health-probe\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"subject\"", body, StringComparison.Ordinal);
     }
 
     [Fact]

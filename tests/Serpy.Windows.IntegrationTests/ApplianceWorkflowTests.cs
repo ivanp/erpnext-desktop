@@ -193,7 +193,7 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
     {
         using var http = MakeClient(baseUrl, cookie);
         var body = new StringContent(
-            JsonSerializer.Serialize(new { subject, status = "Open" }),
+            JsonSerializer.Serialize(new { description = subject, status = "Open" }),
             Encoding.UTF8, "application/json");
         var resp = await http.PostAsync("/api/resource/ToDo", body);
         resp.EnsureSuccessStatusCode();

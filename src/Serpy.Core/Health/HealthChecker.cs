@@ -133,7 +133,7 @@ public sealed class HealthChecker(
         using var http = MakeClient(cookie);
         var body = new StringContent(
             JsonSerializer.Serialize(
-                new CreateToDoRequest { Subject = "Serpy-health-probe", Status = "Open" },
+                new CreateToDoRequest { Description = "Serpy-health-probe", Status = "Open" },
                 HealthJsonContext.Default.CreateToDoRequest),
             Encoding.UTF8, "application/json");
 
