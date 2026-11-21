@@ -7,8 +7,15 @@ using Serpy.Core.Qemu;
 
 namespace Serpy.Core.Tests.Operations;
 
+// ResetOperation wipes the appliance folder. These tests therefore point the app-data root at a
+// temporary folder: against the real one they would delete a user's data.img, and for a moment
+// they put a data.img where tests running beside them (RecordAcceptedBuild) can see it. The
+// collection also runs them alone, because the override is process wide.
+[Collection("LifecycleLock")]
 public sealed class ResetOperationTests : IDisposable
 {
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
     private readonly string _dir =
         Path.Combine(Path.GetTempPath(), $"SerpyResetTest-{Guid.NewGuid():N}");
     private readonly string _applianceDir;
@@ -16,14 +23,16 @@ public sealed class ResetOperationTests : IDisposable
 
     public ResetOperationTests()
     {
-        _applianceDir = Path.Combine(_dir, "appliance");
-        _settingsDir  = Path.Combine(_dir, "settings");
+        Environment.SetEnvironmentVariable(OverrideVariable, _dir);
+        _applianceDir = KnownPaths.ApplianceDir;
+        _settingsDir  = KnownPaths.SettingsDir;
         Directory.CreateDirectory(_applianceDir);
         Directory.CreateDirectory(_settingsDir);
     }
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
         if (Directory.Exists(_dir))
         {
             try { Directory.Delete(_dir, recursive: true); }
