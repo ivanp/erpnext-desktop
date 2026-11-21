@@ -119,6 +119,28 @@ public sealed class SetupStepTests : IDisposable
     }
 
     [Fact]
+    public async Task AdoptExistingRoute_PassesPreserveDataToBuildOperation()
+    {
+        var state = NewStateStore();
+        var setup = new SetupStateStore(Path.Combine(_dir, "setup-state.json"));
+        setup.Mutate(s => s.CompanyDataRoute = CompanyDataRoute.AdoptExisting);
+        bool preserveData = false;
+        var step = new BuildStep(
+            null!, state, setup,
+            execute: (id, _, preserve, _) =>
+            {
+                preserveData = preserve;
+                return Task.FromResult(new OperationResult(
+                    id, OperationKind.Build, OperationOutcome.Success, "built"));
+            });
+
+        var result = await step.RunAsync(Context(), CancellationToken.None);
+
+        Assert.Equal(OperationOutcome.Success, result.Outcome);
+        Assert.True(preserveData);
+    }
+
+    [Fact]
     public void BuildLeftovers_AreDeleted_ButTheAcceptedImageAndItsManifestAreNot()
     {
         WriteAcceptedImage();

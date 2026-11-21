@@ -4,6 +4,7 @@ using Serpy.Core.Coordination;
 using Serpy.Core.Images;
 using Serpy.Core.Operations;
 using Serpy.Core.Versions;
+using Serpy.Core.Configuration;
 
 namespace Serpy.Core.Tests.Operations;
 
@@ -243,40 +244,31 @@ public sealed class AdoptionOperationTests : IDisposable
     [Fact]
     public async Task InsufficientDiskSpace_ReturnsDiskFull_BeforeAnyCopy_AndLeavesArchiveUntouched()
     {
-        var applianceDir = Path.Combine(_dir, "appliance");
-        Directory.CreateDirectory(applianceDir);
-        var archivePath = Path.Combine(applianceDir, "data.img");
-        var archiveBytes = new byte[] { 1, 2, 3, 4, 5 };
-        File.WriteAllBytes(archivePath, archiveBytes);
-
-        var systemPath = Path.Combine(applianceDir, "system.qcow2");
-        File.WriteAllText(systemPath, "system");
-
-        // Force KnownPaths.ApplianceDir override if needed, or point SystemImagePath to appliance
-        var store = new StateStore(Path.Combine(_dir, "state.json"));
-        var creds = new HealthCredentials(Path.Combine(_dir, "creds"));
-        var settings = new ApplianceSettings();
-        var manifest = CreateManifest();
-
-        // Free space is 500 bytes, far less than file length + 2 GiB
-        var op = new AdoptOperation(
-            null!, null!, null!, creds, store, manifest, settings,
-            freeSpaceBytes: () => 500);
-
-        var inspection = new ArchiveInspection(
-            ArchiveInspectionVerdict.AuthenticatedPreflightPassed,
-            archivePath,
-            "expected-digest");
-
-        var parameters = new AdoptParameters(archivePath, "admin");
-        var progress = new Progress<OperationUpdate>();
-
         var prevAppdata = Environment.GetEnvironmentVariable("SERPY_TEST_APPDATA");
         try
         {
-            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", applianceDir);
+            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", _dir);
+            var applianceDir = KnownPaths.ApplianceDir;
+            Directory.CreateDirectory(applianceDir);
+            var archivePath = Path.Combine(applianceDir, "data.img");
+            var archiveBytes = new byte[] { 1, 2, 3, 4, 5 };
+            File.WriteAllBytes(archivePath, archiveBytes);
+            File.WriteAllText(Path.Combine(applianceDir, "system.qcow2"), "system");
+
+            var store = new StateStore(Path.Combine(_dir, "state.json"));
+            var creds = new HealthCredentials(Path.Combine(_dir, "creds"));
+            var op = new AdoptOperation(
+                null!, null!, null!, creds, store, CreateManifest(), new ApplianceSettings(),
+                freeSpaceBytes: () => 500);
+            var inspection = new ArchiveInspection(
+                ArchiveInspectionVerdict.AuthenticatedPreflightPassed,
+                archivePath,
+                "expected-digest");
+            var parameters = new AdoptParameters(archivePath, "admin");
+
             var result = await op.ExecuteAsync(
-                Guid.NewGuid(), parameters, inspection, legacyConsentApproved: true, progress, CancellationToken.None);
+                Guid.NewGuid(), parameters, inspection, legacyConsentApproved: true,
+                new Progress<OperationUpdate>(), CancellationToken.None);
 
             Assert.Equal(OperationOutcome.Failure, result.Outcome);
             Assert.Equal(FailureCode.DiskFull, result.Code);

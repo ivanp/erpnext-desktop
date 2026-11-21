@@ -87,7 +87,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
                     KnownPaths.ApplianceDir, setupStore, stateStore)));
         }
 
-        steps.Add(new BuildStep(_buildOp, stateStore));
+        steps.Add(new BuildStep(_buildOp, stateStore, setupStore));
         steps.Add(new CompanyDataStep(
             _initOp, stateStore, _adoptOp, _inspectArchiveOp, setupStore, healthCredentials));
         steps.Add(new StartStep(_startOp, stateStore));

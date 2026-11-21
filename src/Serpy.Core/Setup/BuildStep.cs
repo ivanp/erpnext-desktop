@@ -14,9 +14,14 @@ namespace Serpy.Core.Setup;
 public sealed class BuildStep(
     BuildOperation build,
     StateStore stateStore,
-    Func<string>? applianceDir = null) : ISetupStep
+    SetupStateStore? setupStore = null,
+    Func<string>? applianceDir = null,
+    Func<Guid, IProgress<OperationUpdate>, bool, CancellationToken, Task<OperationResult>>? execute = null) : ISetupStep
 {
+    private readonly SetupStateStore? _setupStore = setupStore;
     private readonly Func<string> _applianceDir = applianceDir ?? (() => KnownPaths.ApplianceDir);
+    private readonly Func<Guid, IProgress<OperationUpdate>, bool, CancellationToken, Task<OperationResult>> _execute =
+        execute ?? ((id, progress, preserve, ct) => build.ExecuteAsync(id, progress, preserve, ct));
 
     public SetupStepId Id => SetupStepId.Build;
     public int Weight => 55;
@@ -42,7 +47,11 @@ public sealed class BuildStep(
 
     public async Task<SetupStepResult> RunAsync(SetupContext context, CancellationToken ct)
     {
-        var result = await build.ExecuteAsync(Guid.NewGuid(), context.AsProgress(), ct);
+        var preserveData = _setupStore?.Read().CompanyDataRoute == CompanyDataRoute.AdoptExisting;
+        context.Log(preserveData
+            ? "Building the system image while preserving existing company data."
+            : "Building a new site-less system image.");
+        var result = await _execute(Guid.NewGuid(), context.AsProgress(), preserveData, ct);
         return SetupStepResult.From(result);
     }
 
