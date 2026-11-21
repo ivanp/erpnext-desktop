@@ -249,8 +249,8 @@ public sealed class RecoverOperation(
             runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
         await using var _ = await SerialClient.ConnectAsync(
             "127.0.0.1", serialPort, clientCert, caCert, ct);
-        await using var qga = await QgaClient.ConnectAsync(
-            "127.0.0.1", qgaPort, clientCert, caCert, ct);
+        await using var qga = await QgaClient.ConnectWhenReadyAsync(
+            "127.0.0.1", qgaPort, clientCert, caCert, ct: ct);
         var guestOps = new GuestOperations(qga);
 
         if (!state.RecoveryJournal.MariaDbUpgraded)

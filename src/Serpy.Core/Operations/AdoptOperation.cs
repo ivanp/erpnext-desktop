@@ -179,7 +179,7 @@ public sealed class AdoptOperation(
             proc = QemuProcess.Start(runtimeResolver.QemuSystemExe, args.Args, logPath, log, endWithSerpy: true);
 
             Report("qga-wait", "Waiting for QGA agent…", 55);
-            await using var qga = await QgaClient.ConnectAsync("127.0.0.1", qgaPort, clientCert, caCert, ct).ConfigureAwait(false);
+            await using var qga = await QgaClient.ConnectWhenReadyAsync("127.0.0.1", qgaPort, clientCert, caCert, ct: ct).ConfigureAwait(false);
 
             // 6. Password authentication via QGA (R8: authenticates stdin-only without modifying password)
             Report("validate-pwd", "Authenticating administrator credentials…", 60);

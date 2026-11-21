@@ -119,8 +119,9 @@ public sealed class InitializeOperation(
             Report("qga", "Waiting for guest agent…", 20);
             await using var serial = await SerialClient.ConnectAsync(
                 "127.0.0.1", serialPort, clientCert, caCert, ct);
-            await using var qga = await QgaClient.ConnectAsync(
-                "127.0.0.1", qgaPort, clientCert, caCert, ct);
+            // The agent comes up some seconds after the boot, so this waits for it (up to 5 minutes).
+            await using var qga = await QgaClient.ConnectWhenReadyAsync(
+                "127.0.0.1", qgaPort, clientCert, caCert, ct: ct);
             var guestOps = new GuestOperations(qga);
 
             // 5. init-data.sh via QGA (password via stdin, never in args).

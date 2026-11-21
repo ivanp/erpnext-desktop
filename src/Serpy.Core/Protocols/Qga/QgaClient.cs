@@ -18,17 +18,32 @@ namespace Serpy.Core.Protocols.Qga;
 /// </summary>
 public sealed class QgaClient : IAsyncDisposable
 {
+    /// <summary>
+    /// How long one connection waits for the agent to answer its sync request. A guest that is still
+    /// booting does not answer, so callers that start a VM use <see cref="ConnectWhenReadyAsync"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultSyncTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long a freshly started guest has to bring its agent up.</summary>
+    public static readonly TimeSpan DefaultReadyWait = TimeSpan.FromMinutes(5);
+
     private readonly SslStream _ssl;
+    private readonly TimeSpan _syncTimeout;
     private bool _disposed;
 
-    private QgaClient(SslStream ssl) => _ssl = ssl;
+    private QgaClient(SslStream ssl, TimeSpan syncTimeout)
+    {
+        _ssl = ssl;
+        _syncTimeout = syncTimeout;
+    }
 
     public static async Task<QgaClient> ConnectAsync(
         string host,
         int port,
         X509Certificate2 clientCert,
         X509Certificate2 caCert,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        TimeSpan? syncTimeout = null)
     {
         var tcp = new TcpClient();
         await tcp.ConnectAsync(host, port, ct);
@@ -57,9 +72,61 @@ public sealed class QgaClient : IAsyncDisposable
                                     | System.Security.Authentication.SslProtocols.Tls12,
             }, ct);
 
-        var client = new QgaClient(ssl);
-        await client.SyncAsync(ct);
-        return client;
+        var client = new QgaClient(ssl, syncTimeout ?? DefaultSyncTimeout);
+        try
+        {
+            await client.SyncAsync(ct);
+            return client;
+        }
+        catch
+        {
+            // A connection that never synced must not hold the chardev: QEMU serves one client at a time.
+            await ssl.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Connects to the agent of a guest that has just been started. The agent comes up some seconds
+    /// after the boot, and until then the sync request gets no answer, so this tries again until
+    /// <paramref name="wait"/> has passed. It ends early only when <paramref name="ct"/> is cancelled,
+    /// and then it throws <see cref="OperationCanceledException"/>. A guest that never answers gives a
+    /// <see cref="TimeoutException"/> that names the agent.
+    /// </summary>
+    public static async Task<QgaClient> ConnectWhenReadyAsync(
+        string host,
+        int port,
+        X509Certificate2 clientCert,
+        X509Certificate2 caCert,
+        TimeSpan? wait = null,
+        CancellationToken ct = default,
+        TimeSpan? attemptTimeout = null,
+        TimeSpan? retryDelay = null)
+    {
+        var deadline = DateTime.UtcNow + (wait ?? DefaultReadyWait);
+        var delay = retryDelay ?? TimeSpan.FromSeconds(2);
+        Exception? last = null;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await ConnectAsync(host, port, clientCert, caCert, ct, attemptTimeout);
+            }
+            catch (Exception ex) when (ex is TimeoutException or IOException or SocketException
+                                          or System.Security.Authentication.AuthenticationException)
+            {
+                last = ex;
+            }
+
+            if (DateTime.UtcNow + delay >= deadline)
+                throw new TimeoutException(
+                    $"The guest agent did not answer within {(wait ?? DefaultReadyWait).TotalSeconds:0} seconds. " +
+                    $"Last problem: {last.Message}", last);
+
+            await Task.Delay(delay, ct);
+        }
     }
 
     // ── Sync ──────────────────────────────────────────────────────────────
@@ -75,21 +142,29 @@ public sealed class QgaClient : IAsyncDisposable
         await WriteLineAsync(json, ct);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(10));
-        while (!cts.Token.IsCancellationRequested)
+        cts.CancelAfter(_syncTimeout);
+        try
         {
-            var line = await ReadLineAsync(cts.Token);
-            if (string.IsNullOrEmpty(line)) continue;
-            try
+            while (true)
             {
-                using var doc = JsonDocument.Parse(line);
-                if (doc.RootElement.TryGetProperty("return", out var ret)
-                    && ret.TryGetInt32(out var id) && id == expectedId)
-                    return;
+                var line = await ReadLineAsync(cts.Token);
+                if (string.IsNullOrEmpty(line)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.TryGetProperty("return", out var ret)
+                        && ret.TryGetInt32(out var id) && id == expectedId)
+                        return;
+                }
+                catch (JsonException) { }
             }
-            catch (JsonException) { }
         }
-        throw new TimeoutException("QGA sync timed out.");
+        // The sync timer ending a read is a timeout. Only the caller's own token is a cancel; reporting
+        // the timer as one made Initialize say it was cancelled when the guest was only still booting.
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException("QGA sync timed out.");
+        }
     }
 
     // ── guest-exec ────────────────────────────────────────────────────────
