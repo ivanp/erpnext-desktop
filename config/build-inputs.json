@@ -3353,6 +3353,17 @@
           "inGuest": true
         },
         {
+          "key": "flit_core-3.11.0-py3-none-any.whl",
+          "path": "wheels/flit_core-3.11.0-py3-none-any.whl",
+          "size": 44926,
+          "sha256": "fe464c086f630f106c0fc5001ee377980f45938f03f8f0d03da08a4841748541",
+          "sha512": null,
+          "urls": [
+            "https://files.pythonhosted.org/packages/b5/0c/039f1ec352977330a372c783adcbc5c3773868fa71cb00bb7db7b428e76a/flit_core-3.11.0-py3-none-any.whl"
+          ],
+          "inGuest": true
+        },
+        {
           "key": "flit_core-4.2.0-py3-none-any.whl",
           "path": "wheels/flit_core-4.2.0-py3-none-any.whl",
           "size": 48025,
@@ -3870,13 +3881,13 @@
           "inGuest": true
         },
         {
-          "key": "pdfplumber-0.11.11-py3-none-any.whl",
-          "path": "wheels/pdfplumber-0.11.11-py3-none-any.whl",
-          "size": 60456,
-          "sha256": "81fd7c493ac69a0645a68da49320e4e2cace05d99824439accc7b5b3d955f3bc",
+          "key": "pdfplumber-0.11.10-py3-none-any.whl",
+          "path": "wheels/pdfplumber-0.11.10-py3-none-any.whl",
+          "size": 60047,
+          "sha256": "7741ea81bf165b474b153e6789d10d18e06b6ddcf3ec84289c3ef2fed6802580",
           "sha512": null,
           "urls": [
-            "https://files.pythonhosted.org/packages/25/27/0b40cb094fe566445fef76ff5c458b63031baf17c246b40b116d472ce2ac/pdfplumber-0.11.11-py3-none-any.whl"
+            "https://files.pythonhosted.org/packages/a2/9a/07d658e1e7fad860f1c541ab941348125dbdab773be3a0afaf32361866c7/pdfplumber-0.11.10-py3-none-any.whl"
           ],
           "inGuest": true
         },
@@ -3903,13 +3914,13 @@
           "inGuest": true
         },
         {
-          "key": "pillow-13.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
-          "path": "wheels/pillow-13.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
-          "size": 7142574,
-          "sha256": "e91c2b1cbeae768c98752e67e717e283d68dae45717b41f2d91eaee648e37b7d",
+          "key": "pillow-12.2.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "path": "wheels/pillow-12.2.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+          "size": 7083360,
+          "sha256": "4bfd07bc812fbd20395212969e41931001fd59eb55a60658b0e5710872e95286",
           "sha512": null,
           "urls": [
-            "https://files.pythonhosted.org/packages/1d/f2/1371707ce438ba9a43f9d24089828494ec6f9396e28cd7903aa704dd6306/pillow-13.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+            "https://files.pythonhosted.org/packages/11/8d/d2532ad2a603ca2b93ad9f5135732124e57811d0168155852f37fbce2458/pillow-12.2.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
           ],
           "inGuest": true
         },
@@ -15373,6 +15384,18 @@
           "sha512": null,
           "urls": [
             "https://github.com/frappe/gunicorn/archive/54b59ca884c79dcf04d4882658a32bbaf17e999f.tar.gz"
+          ],
+          "inGuest": true
+        }
+        ,
+        {
+          "key": "air-datepicker.tar.gz",
+          "path": "git/air-datepicker.tar.gz",
+          "size": 152944,
+          "sha256": "d9cd005f3fe9f4579ef9acc5dd4c2782a7443d20184d95a0d9286e65a33ecbc1",
+          "sha512": null,
+          "urls": [
+            "https://github.com/frappe/air-datepicker/archive/ed37b94d95c68d8544357e330be0c89d044a3eea.tar.gz"
           ],
           "inGuest": true
         }

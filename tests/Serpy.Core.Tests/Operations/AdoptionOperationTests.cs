@@ -7,7 +7,7 @@ using Serpy.Core.Versions;
 using Serpy.Core.Configuration;
 
 namespace Serpy.Core.Tests.Operations;
-
+[Collection("LifecycleLock")]
 public sealed class AdoptionOperationTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyAdoptTest-{Guid.NewGuid():N}");

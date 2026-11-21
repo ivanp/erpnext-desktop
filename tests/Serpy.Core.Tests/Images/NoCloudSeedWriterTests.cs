@@ -150,9 +150,9 @@ public sealed class NoCloudSeedWriterTests : IDisposable
     {
         var template = ReadGuestAsset("provision.sh");
 
-        Assert.Contains("git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99", template);
-        Assert.Contains("git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325", template);
-        Assert.Contains("git rev-parse HEAD | grep -Fx", template);
+        Assert.Contains("6a329d068416768ec47ccd3326b9cc95a8d7bf99", template);
+        Assert.Contains("11e0ba0a1c45f217e2e73e885f699102d06da325", template);
+        Assert.Contains("git get-tar-commit-id", template);
     }
 
     [Fact]

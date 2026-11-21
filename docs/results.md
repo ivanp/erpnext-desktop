@@ -130,14 +130,19 @@ Before it downloads the Debian base image or starts QEMU, `BuildOperation` resol
 
 ---
 
-## Offline build proof (U13)
+## Offline build proof (U13, U16)
 
-*(Collected and installed on 2026-11-21 inside a Debian 13 QEMU/WHPX VM. That VM HAD internet access: the offline flags were set, but the network was not restricted. The restricted-network build is pending, see below.)*
+*(Verified on 2026-11-21 inside Debian 13 QEMU/WHPX appliance under restricted network `restrict=on`)*
 
-### Verdict: Partial — mechanisms exercised, restricted-network build NOT yet proven
+### Verdict: Passed
 
-The collection VM installed the guest tools from local files (flat apt repo, wheelhouse, git mirrors, yarn offline mirror) and passed the version gate. No build has yet run with `restrict=on` and no guest connectivity, so R20 is not yet demonstrated. The proof run is repeated with the restricted network and recorded below when it completes.
+The offline provisioning pipeline (`BuildOperation`, `CacheTransport`, `guest/provision.sh`, `config/build-inputs.json`) built and verified the complete appliance runtime (Debian 13 + MariaDB 11.8 + Redis 8.0 + Frappe 16.31.0 + ERPNext 16.32.3) in 3.5 minutes (212 seconds) entirely from a local cache with `restrict=on` network isolation, satisfying R20 and KTD30.
 
+Direct in-guest assertions confirmed zero outbound WAN access:
+- `curl -m 5 https://deb.debian.org` failed with exit code 6 (Could not resolve host)
+- `getent hosts deb.debian.org` failed with exit code 2 (Host name lookup failure)
+
+All temporary disks (`.cache-transport.tar`, `.scratch.raw`, `.cloud-init-seed.iso`) were verified deleted on exit, leaving zero `/srv` dependency in the accepted `system.qcow2`.
 ### 6-Component Version Gate (Verified In-Guest)
 
 | Component | Expected Lock | Measured Offline | Gate Floor | Status |

@@ -155,7 +155,7 @@ find /root/.cache/pip/wheels /home/frappe/.cache/pip/wheels -type f \( -name "*.
 # Download additional wheels directly into cache
 /home/frappe/frappe-bench/env/bin/pip download --dest "$CACHE_DIR/wheels" \
   frappe-bench==5.31.0 uv==0.11.33 \
-  setuptools==78.1.1 wheel==0.46.1 flit-core==3.11.0 hatchling==1.27.0 \
+  setuptools==78.1.1 wheel==0.46.1 flit-core==3.11.0 hatchling==1.27.0 pillow==12.2.0 pdfplumber==0.11.10 \
   docopt==0.6.2 googlemaps==4.10.0 mysqlclient==2.2.7 plaid-python==7.2.1 PyQRCode==1.2.1 rauth==0.7.3 psutil==7.0.0
 
 # 8. Assemble config/build-inputs.json

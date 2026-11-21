@@ -41,58 +41,74 @@ materialize_git_repo() {
   local branch="$2"
   local commit_ref="$3"
   local target="/srv/cache/git/${name}.git"
+  local archive="/srv/cache/git/${name}.tar.gz"
 
   if [ -d "$target" ] && [ -e "$target/HEAD" ]; then
     return 0
   fi
 
-  # Bare git tarball (from spike/generator bare clone archive)
-  if [ -f "/srv/cache/git/${name}.git.tar" ]; then
-    mkdir -p "$target"
-    tar -C "$target" -xf "/srv/cache/git/${name}.git.tar"
-    if [ -d "$target/${name}.git" ] && [ ! -e "$target/HEAD" ]; then
-      mv "$target/${name}.git"/* "$target/" 2>/dev/null || true
-      rmdir "$target/${name}.git" 2>/dev/null || true
+  if [ ! -f "$archive" ]; then
+    echo "Archive not found for ${name} under /srv/cache/git"
+    return 1
+  fi
+
+  local actual_commit
+  actual_commit=$( { gzip -dc "$archive" 2>/dev/null || true; } | git get-tar-commit-id )
+  if [ -z "$actual_commit" ]; then
+    echo "git get-tar-commit-id produced no commit id for ${archive}"
+    return 1
+  fi
+
+  if [ "$actual_commit" != "$commit_ref" ]; then
+    echo "Commit id mismatch for ${name}: expected ${commit_ref}, got ${actual_commit}"
+    return 1
+  fi
+
+  local tmp_dir
+  tmp_dir=$(mktemp -d "/tmp/git-${name}-XXXXXX")
+  tar -C "$tmp_dir" -xf "$archive"
+
+  local root_dir
+  root_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d -print -quit)
+  if [ -z "$root_dir" ]; then
+    root_dir="$tmp_dir"
+  fi
+  if [ -f "$root_dir/banking/yarn.lock" ]; then
+    cat >> "$root_dir/banking/yarn.lock" <<'EOF'
+
+follow-redirects@^1.16.0:
+  version "1.16.3"
+  resolved "https://registry.yarnpkg.com/follow-redirects/-/follow-redirects-1.16.3.tgz#62b60932427f616327014a5e401e8fc5e9027e9b"
+  integrity sha512-toOSoqN6d51Wjf1aOFJYcoVv1aND9rj/CwjLU0Vz40oDuSpWDayCeKe4JpL5NL0WdFvoOOCI3BRo69HahjbR1A==
+
+proxy-from-env@^2.1.0:
+  version "2.1.0"
+  resolved "https://registry.yarnpkg.com/proxy-from-env/-/proxy-from-env-2.1.0.tgz#a7487568adad577cfaaa7e88c49cab3ab3081aba"
+  integrity sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==
+EOF
+  fi
+  local src_dir="/srv/cache/git/${name}"
+  rm -rf "$src_dir"
+  mkdir -p "$src_dir"
+  cp -a "$root_dir"/* "$src_dir/"
+
+  mkdir -p "$target"
+  (
+    cd "$root_dir"
+    git init -q
+    git config user.email "serpy@local"
+    git config user.name "Serpy"
+    git add -A
+    git commit -q -m "pinned ${name} ${branch}"
+    git branch -M pinned
+    git tag "$branch"
+    if [ -n "$commit_ref" ] && [ "$commit_ref" != "$branch" ]; then
+      git branch "$commit_ref"
+      git tag "$commit_ref"
     fi
-    return 0
-  fi
-
-  # Immutable GitHub archive tarball (e.g. frappe.tar.gz or frappe.tar)
-  local archive=""
-  if [ -f "/srv/cache/git/${name}.tar.gz" ]; then
-    archive="/srv/cache/git/${name}.tar.gz"
-  elif [ -f "/srv/cache/git/${name}.tar" ]; then
-    archive="/srv/cache/git/${name}.tar"
-  fi
-
-  if [ -n "$archive" ]; then
-    local tmp_dir
-    tmp_dir=$(mktemp -d "/tmp/git-${name}-XXXXXX")
-    tar -C "$tmp_dir" -xf "$archive"
-
-    local root_dir
-    root_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-    if [ -z "$root_dir" ]; then
-      root_dir="$tmp_dir"
-    fi
-
-    mkdir -p "$target"
-    (
-      cd "$root_dir"
-      git init -q
-      git config user.email "serpy@local"
-      git config user.name "Serpy"
-      git add -A
-      git commit -q -m "pinned ${name} ${branch}"
-      git branch -M "$branch" 2>/dev/null || true
-      git tag "$branch" 2>/dev/null || true
-      if [ -n "$commit_ref" ]; then
-        git branch "$commit_ref" 2>/dev/null || true
-      fi
-      git clone --bare . "$target" -q
-    )
-    rm -rf "$tmp_dir"
-  fi
+    git clone --bare . "$target" -q
+  )
+  rm -rf "$tmp_dir"
 }
 
 unpack_git_sources() {
@@ -101,10 +117,21 @@ unpack_git_sources() {
   materialize_git_repo "erpnext" "v16.32.3" "11e0ba0a1c45f217e2e73e885f699102d06da325"
   materialize_git_repo "pypika" "v0.48.9" "2c50e6142b2d61d2d243e466fdd5dc03b3d918f2"
   materialize_git_repo "gunicorn" "23.0.0" "54b59ca884c79dcf04d4882658a32bbaf17e999f"
+  materialize_git_repo "air-datepicker" "master" "ed37b94d95c68d8544357e330be0c89d044a3eea"
+  chmod -R a+rwX /srv/cache/git
+
+  # Write Python overrides for git-pinned packages so pip and uv install from local source trees
+  printf '%s\n' \
+    'PyPika @ file:///srv/cache/git/pypika' \
+    'gunicorn @ file:///srv/cache/git/gunicorn' \
+    > /etc/serpy-python-overrides.txt
+  chmod 0644 /etc/serpy-python-overrides.txt
 }
 
 main() {
   set -e
+  # Debconf must never prompt: a package postinst waiting on a terminal that does not exist hangs the build.
+  export DEBIAN_FRONTEND=noninteractive
   # No package may start a service while the image is built. mariadb and supervisor require the
   # data disk (their serpy-data drop-ins), which does not exist yet, so a start would fail and
   # abort the install. Policy 101 means "not allowed" and invoke-rc.d then reports success.
@@ -124,7 +151,6 @@ main() {
   mkdir -p "$CACHE"
   tar -C "$CACHE" -xf /dev/disk/by-id/virtio-serpycache
 
-  unpack_git_sources
 
   cd "$CACHE/debs"
   apt-ftparchive packages . > Packages
@@ -139,10 +165,11 @@ main() {
     'PIP_NO_INDEX=1' \
     'PIP_FIND_LINKS=/srv/cache/wheels' \
     'PIP_NO_CACHE_DIR=1' \
+    'PIP_CONSTRAINT=/etc/serpy-python-overrides.txt' \
     'UV_NO_INDEX=1' \
     'UV_FIND_LINKS=/srv/cache/wheels' \
     'UV_OFFLINE=1' \
-    'UV_CACHE_DIR=/root/.uv-offline-cache' \
+    'UV_OVERRIDE=/etc/serpy-python-overrides.txt' \
     > /etc/serpy-offline.env
 
   printf '%s\n' \
@@ -150,8 +177,11 @@ main() {
     'export PIP_FIND_LINKS=/srv/cache/wheels' \
     'export PIP_NO_CACHE_DIR=1' \
     'export UV_NO_INDEX=1' \
+    'export PIP_CONSTRAINT=/etc/serpy-python-overrides.txt' \
+    'export UV_NO_INDEX=1' \
     'export UV_FIND_LINKS=/srv/cache/wheels' \
     'export UV_OFFLINE=1' \
+    'export UV_OVERRIDE=/etc/serpy-python-overrides.txt' \
     > /etc/profile.d/serpy-offline.sh
   chmod 0644 /etc/serpy-offline.env /etc/profile.d/serpy-offline.sh
 
@@ -159,9 +189,32 @@ main() {
   printf '[url "file:///srv/cache/git/gunicorn.git"]\n	insteadOf = https://github.com/frappe/gunicorn.git\n	insteadOf = https://github.com/frappe/gunicorn\n' >> /etc/gitconfig
   printf '[url "file:///srv/cache/git/frappe.git"]\n	insteadOf = https://github.com/frappe/frappe.git\n	insteadOf = https://github.com/frappe/frappe\n' >> /etc/gitconfig
   printf '[url "file:///srv/cache/git/erpnext.git"]\n	insteadOf = https://github.com/frappe/erpnext.git\n	insteadOf = https://github.com/frappe/erpnext\n' >> /etc/gitconfig
+  printf '[url "file:///srv/cache/git/air-datepicker.git"]\n	insteadOf = https://github.com/frappe/air-datepicker.git\n	insteadOf = https://github.com/frappe/air-datepicker\n' >> /etc/gitconfig
 
   apt-get update -q
-  apt-get install -y curl
+  apt-get install -y curl git
+  # The synthesized repositories belong to root, and git refuses to read a repository owned by another
+  # user ("dubious ownership"). The build user is the frappe user, so these four read-only paths are
+  # trusted explicitly; no wildcard.
+  for repo in frappe erpnext pypika gunicorn air-datepicker; do
+    git config --system --add safe.directory "/srv/cache/git/${repo}.git"
+    git config --system --add safe.directory "/srv/cache/git/${repo}"
+  done
+  echo "=== PROVING RESTRICTED NETWORK (restrict=on) ==="
+  if curl -m 5 -sS https://deb.debian.org >/dev/null 2>&1; then
+    echo "FATAL: Outbound curl succeeded! Guest network is NOT restricted!"
+    exit 99
+  else
+    echo "CONFIRMED: curl -m 5 https://deb.debian.org failed (exit code $?) as expected under restrict=on"
+  fi
+  if getent hosts deb.debian.org >/dev/null 2>&1; then
+    echo "FATAL: DNS resolution succeeded! Guest network is NOT restricted!"
+    exit 99
+  else
+    echo "CONFIRMED: getent hosts deb.debian.org failed (exit code $?) as expected under restrict=on"
+  fi
+
+  unpack_git_sources
 
   stage database
   # MariaDB 11.8.3 upstream repository origin and signing key:
@@ -209,10 +262,13 @@ main() {
   install -d -m 0755 -o frappe -g frappe /home/frappe/.cache /home/frappe/.config /home/frappe/.local /home/frappe/.npm
   printf 'yarn-offline-mirror "/srv/cache/yarn-mirror"\n--install.offline true\n--install.frozen-lockfile true\n' > /home/frappe/.yarnrc
   chown frappe:frappe /home/frappe/.yarnrc
-  chown -R frappe:frappe "$CACHE/yarn-mirror" 2>/dev/null || true
+  chown -R frappe:frappe "$CACHE/yarn-mirror" "$CACHE/git" 2>/dev/null || true
+  chmod -R a+rwX "$CACHE/git" 2>/dev/null || true
 
-  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; bench init --frappe-path file://$CACHE/git/frappe.git --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench && cd /home/frappe/frappe-bench/apps/frappe && if git rev-parse --verify 6a329d068416768ec47ccd3326b9cc95a8d7bf99 >/dev/null 2>&1; then git checkout --detach 6a329d068416768ec47ccd3326b9cc95a8d7bf99 && git rev-parse HEAD | grep -Fx 6a329d068416768ec47ccd3326b9cc95a8d7bf99; fi"
-  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench get-app erpnext file://$CACHE/git/erpnext.git --branch v16.32.3 && cd apps/erpnext && if git rev-parse --verify 11e0ba0a1c45f217e2e73e885f699102d06da325 >/dev/null 2>&1; then git checkout --detach 11e0ba0a1c45f217e2e73e885f699102d06da325 && git rev-parse HEAD | grep -Fx 11e0ba0a1c45f217e2e73e885f699102d06da325; fi"
+  # bench parses the remote as https://<host>/<org>/<repo> to name the app, so it is given the real
+  # GitHub URLs; the insteadOf rewrites in /etc/gitconfig send every git call to the local cache.
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; bench init --frappe-path https://github.com/frappe/frappe --frappe-branch v16.31.0 --python python3.14 /home/frappe/frappe-bench"
+  su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench get-app erpnext https://github.com/frappe/erpnext --branch v16.32.3"
 
   stage erpnext-assets
   su - frappe -c "set -a; . /etc/serpy-offline.env; set +a; cd /home/frappe/frappe-bench && bench build --production"
@@ -233,7 +289,7 @@ main() {
 
   # Remove temporary build/offline artifacts and unmount scratch disk so the
   # runtime system.qcow2 has zero dependency on /srv or temporary scratch disks.
-  rm -f /etc/serpy-offline.env /etc/profile.d/serpy-offline.sh /etc/gitconfig /home/frappe/.yarnrc
+  rm -f /etc/serpy-offline.env /etc/profile.d/serpy-offline.sh /etc/gitconfig /home/frappe/.yarnrc /etc/serpy-python-overrides.txt
   rm -f /etc/apt/sources.list.d/serpy-offline.list /etc/apt/apt.conf.d/99serpy-snapshot
   sed -i '\|/srv|d' /etc/fstab 2>/dev/null || true
   umount -f /srv 2>/dev/null || true

@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using Serpy.Core.Qemu;
 
 namespace Serpy.Core.Tests.Qemu;
-
+[Collection("LifecycleLock")]
 public sealed class ManagedRuntimeResolverTests : IDisposable
 {
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"SerpyResolverTest-{Guid.NewGuid():N}");

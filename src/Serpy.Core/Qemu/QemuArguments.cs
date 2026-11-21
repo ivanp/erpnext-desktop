@@ -37,6 +37,15 @@ public sealed class QemuArguments
         Add("-drive", $"file={imagePath},format={format},if=virtio,index=0{(snapshot ? ",snapshot=on" : string.Empty)}");
 
     /// <summary>
+    /// System disk for the build VM, which also carries the transport and scratch disks as explicit
+    /// virtio-blk devices. SeaBIOS boots the first disk it finds, so the system disk is given
+    /// bootindex=1. Runtime VMs keep <see cref="SystemDisk"/> and the data disk's /dev/vdb position.
+    /// </summary>
+    public QemuArguments BuildSystemDisk(string imagePath, string format = "qcow2") =>
+        Add("-drive", $"file={imagePath},format={format},if=none,id=system0")
+        .Add("-device", "virtio-blk-pci,drive=system0,bootindex=1");
+
+    /// <summary>
     /// Persistent data disk using the Windows-valid fsync-honoring policy (KTD6):
     /// cache=none,aio=threads for WHPX. Policy comes from AcceleratorResult.
     /// </summary>
@@ -53,14 +62,16 @@ public sealed class QemuArguments
     /// Serial 'serpycache' allows guest udev to locate it at /dev/disk/by-id/virtio-serpycache.
     /// </summary>
     public QemuArguments TransportDisk(string imagePath) =>
-        Add("-drive", $"file={imagePath},format=raw,if=virtio,readonly=on,serial=serpycache");
+        Add("-drive", $"file={imagePath},format=raw,if=none,id=serpycache,readonly=on")
+        .Add("-device", "virtio-blk-pci,drive=serpycache,serial=serpycache");
 
     /// <summary>
     /// Writable raw scratch disk mounted by the guest at /srv to unpack the cache (KTD29).
     /// Serial 'serpyscratch' allows guest udev to locate it at /dev/disk/by-id/virtio-serpyscratch.
     /// </summary>
     public QemuArguments ScratchDisk(string imagePath) =>
-        Add("-drive", $"file={imagePath},format=raw,if=virtio,serial=serpyscratch");
+        Add("-drive", $"file={imagePath},format=raw,if=none,id=serpyscratch")
+        .Add("-device", "virtio-blk-pci,drive=serpyscratch,serial=serpyscratch");
 
     // ── Network ──────────────────────────────────────────────────────────
     /// <summary>

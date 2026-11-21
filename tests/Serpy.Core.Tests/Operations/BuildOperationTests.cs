@@ -215,7 +215,8 @@ public sealed class BuildOperationTests : IDisposable
 
         Assert.NotNull(capturedArgs);
         Assert.Contains(capturedArgs, a => a.Contains("restrict=on", StringComparison.Ordinal));
-        Assert.Contains(capturedArgs, a => a.Contains("serial=serpycache", StringComparison.Ordinal) && a.Contains("readonly=on", StringComparison.Ordinal));
+        Assert.Contains(capturedArgs, a => a.Contains("serial=serpycache", StringComparison.Ordinal));
+        Assert.Contains(capturedArgs, a => a.Contains("readonly=on", StringComparison.Ordinal));
         Assert.Contains(capturedArgs, a => a.Contains("serial=serpyscratch", StringComparison.Ordinal));
     }
 

@@ -50,6 +50,23 @@ public sealed class QemuArgumentsTests
     }
 
     [Fact]
+    public void RuntimeSystemDisk_StaysOnTheLegacyVirtioSlot_SoTheDataDiskIsVdb()
+    {
+        var args = new QemuArguments().SystemDisk("system.qcow2").DataDisk("/data/data.img", WhpxAccel);
+
+        Assert.Contains(args.Args, a => a.Contains("system.qcow2") && a.Contains("if=virtio,index=0"));
+        Assert.Contains(args.Args, a => a.Contains("data.img") && a.Contains("if=virtio,index=1"));
+    }
+
+    [Fact]
+    public void BuildSystemDisk_IsTheFirstBootDevice_WhenTransportAndScratchDisksAreAttached()
+    {
+        var args = new QemuArguments().BuildSystemDisk("staging.qcow2").TransportDisk("t.tar").ScratchDisk("s.raw");
+
+        AssertContainsSequence(args.Args, "-device", "virtio-blk-pci,drive=system0,bootindex=1");
+    }
+
+    [Fact]
     public void SystemDiskSnapshot_UsesATemporaryWriteLayer_WithoutMakingTheAcceptedImageWritable()
     {
         var args = new QemuArguments().SystemDisk("system.qcow2", snapshot: true);
@@ -121,14 +138,16 @@ public sealed class QemuArgumentsTests
     public void TransportDisk_SetsReadOnlyRawWithSerpyCacheSerial()
     {
         var args = new QemuArguments().TransportDisk("C:\\cache-transport.tar").Args;
-        AssertContainsSequence(args, "-drive", "file=C:\\cache-transport.tar,format=raw,if=virtio,readonly=on,serial=serpycache");
+        AssertContainsSequence(args, "-drive", "file=C:\\cache-transport.tar,format=raw,if=none,id=serpycache,readonly=on");
+        AssertContainsSequence(args, "-device", "virtio-blk-pci,drive=serpycache,serial=serpycache");
     }
 
     [Fact]
     public void ScratchDisk_SetsRawWithSerpyScratchSerial()
     {
         var args = new QemuArguments().ScratchDisk("C:\\scratch.raw").Args;
-        AssertContainsSequence(args, "-drive", "file=C:\\scratch.raw,format=raw,if=virtio,serial=serpyscratch");
+        AssertContainsSequence(args, "-drive", "file=C:\\scratch.raw,format=raw,if=none,id=serpyscratch");
+        AssertContainsSequence(args, "-device", "virtio-blk-pci,drive=serpyscratch,serial=serpyscratch");
     }
 
     [Fact]
@@ -150,7 +169,8 @@ public sealed class QemuArgumentsTests
             .UserNetRestricted(8080);
 
         Assert.Contains(args.Args, a => a.Contains("restrict=on", StringComparison.Ordinal));
-        Assert.Contains(args.Args, a => a.Contains("serial=serpycache", StringComparison.Ordinal) && a.Contains("readonly=on", StringComparison.Ordinal));
+        Assert.Contains(args.Args, a => a.Contains("serial=serpycache", StringComparison.Ordinal));
+        Assert.Contains(args.Args, a => a.Contains("readonly=on", StringComparison.Ordinal));
         Assert.Contains(args.Args, a => a.Contains("serial=serpyscratch", StringComparison.Ordinal));
     }
 

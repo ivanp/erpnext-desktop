@@ -46,17 +46,30 @@ public sealed class SerialClient : IAsyncDisposable
         TimeSpan handshakeTimeout,
         CancellationToken ct = default)
     {
-        var tcp = new TcpClient();
+        TcpClient? tcp = null;
         try
         {
             using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 connectCts.CancelAfter(connectTimeout);
-                try { await tcp.ConnectAsync(host, port, connectCts.Token); }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                while (true)
                 {
-                    throw new TimeoutException(
-                        $"Could not connect to the guest console on port {port} within {connectTimeout.TotalSeconds:0} seconds.");
+                    try
+                    {
+                        tcp = new TcpClient();
+                        await tcp.ConnectAsync(host, port, connectCts.Token);
+                        break;
+                    }
+                    catch (SocketException) when (!connectCts.IsCancellationRequested)
+                    {
+                        tcp?.Dispose();
+                        await Task.Delay(200, connectCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"Could not connect to the guest console on port {port} within {connectTimeout.TotalSeconds:0} seconds.");
+                    }
                 }
             }
 
@@ -101,7 +114,7 @@ public sealed class SerialClient : IAsyncDisposable
         }
         catch
         {
-            tcp.Dispose();
+            tcp?.Dispose();
             throw;
         }
     }
