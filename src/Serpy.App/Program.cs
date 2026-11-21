@@ -40,7 +40,13 @@ catch (Exception ex)
 
 using (singleInstanceMutex)
 {
-    bool trayOnly = args.Contains("--tray", StringComparer.OrdinalIgnoreCase);
+    bool isResumeSetup = args.Contains("--resume-setup", StringComparer.OrdinalIgnoreCase);
+    if (isResumeSetup && OperatingSystem.IsWindows())
+    {
+        try { RunOnceResume.Disable(); } catch { }
+    }
+
+    bool trayOnly = !isResumeSetup && args.Contains("--tray", StringComparer.OrdinalIgnoreCase);
 
     // ── Composition root: construct the real ApplianceService ─────────────────
     var settings      = new ApplianceSettings();

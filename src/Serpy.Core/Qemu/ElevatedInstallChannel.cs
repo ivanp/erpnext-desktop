@@ -48,7 +48,8 @@ public static class ElevatedInstallChannel
         string installerPath,
         TimeSpan connectTimeout,
         CancellationToken ct,
-        System.Diagnostics.Process? elevatedProcess = null)
+        System.Diagnostics.Process? elevatedProcess = null,
+        bool enableWindowsFeatures = false)
     {
         var client = new NamedPipeClientStream(
             ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -56,7 +57,7 @@ public static class ElevatedInstallChannel
         {
             await client.ConnectAsync((int)connectTimeout.TotalMilliseconds, ct);
 
-            var hello = new BootstrapClientHello(nonce, installerPath);
+            var hello = new BootstrapClientHello(nonce, installerPath, enableWindowsFeatures);
             var helloLine = JsonSerializer.Serialize(hello, BootstrapWireJsonContext.Default.BootstrapClientHello);
             await client.WriteAsync(Encoding.UTF8.GetBytes(helloLine + "\n"), ct);
             await client.FlushAsync(ct);
@@ -66,7 +67,7 @@ public static class ElevatedInstallChannel
                 ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable result.");
 
             return new ElevatedInstallSession(
-                client, nonce, new BootstrapLaunchResult(result.ExitCode, result.StagingDir), elevatedProcess);
+                client, nonce, new BootstrapLaunchResult(result.ExitCode, result.StagingDir, result.DismExitCode), elevatedProcess);
         }
         catch
         {
@@ -117,6 +118,7 @@ public sealed class ElevatedInstallSession(
     /// </summary>
     public BootstrapLaunchResult StagedResult { get; } = stagedResult;
 
+    public int? ProcessExitCode => elevatedProcess?.HasExited == true ? elevatedProcess.ExitCode : null;
     /// <summary>
     /// Report the caller's own validation outcome for the staged tree.
     /// <paramref name="approve"/> true grants the requesting user full
@@ -144,7 +146,7 @@ public sealed class ElevatedInstallSession(
         var result = JsonSerializer.Deserialize(resultLine, BootstrapWireJsonContext.Default.BootstrapWireResult)
             ?? throw new InvalidDataException("Elevated bootstrapper sent an empty or unparseable final result.");
 
-        return new BootstrapLaunchResult(result.ExitCode, result.StagingDir);
+        return new BootstrapLaunchResult(result.ExitCode, result.StagingDir, result.DismExitCode);
     }
 
     /// <summary>

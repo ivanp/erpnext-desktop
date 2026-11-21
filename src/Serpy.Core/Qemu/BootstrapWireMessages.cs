@@ -10,9 +10,11 @@ namespace Serpy.Core.Qemu;
 /// authenticates the connection's real token SID via impersonation before
 /// trusting anything in this message.
 /// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BootstrapClientHello(
     [property: JsonPropertyName("nonce")] string Nonce,
-    [property: JsonPropertyName("installerPath")] string InstallerPath);
+    [property: JsonPropertyName("installerPath")] string InstallerPath,
+    [property: JsonPropertyName("enableWindowsFeatures")] bool EnableWindowsFeatures = false);
 
 /// <summary>
 /// Result the elevated bootstrapper (pipe server) sends back to the app
@@ -39,7 +41,8 @@ public sealed record BootstrapClientHello(
 public sealed record BootstrapWireResult(
     [property: JsonPropertyName("exitCode")] int ExitCode,
     [property: JsonPropertyName("stagingDir")] string? StagingDir,
-    [property: JsonPropertyName("errorMessage")] string? ErrorMessage);
+    [property: JsonPropertyName("errorMessage")] string? ErrorMessage,
+    [property: JsonPropertyName("dismExitCode")] int? DismExitCode = null);
 
 /// <summary>
 /// Second-phase message the app sends back over the SAME still-open
@@ -59,6 +62,7 @@ public sealed record BootstrapWireResult(
 /// that has already been finalized once, so this message cannot be
 /// replayed or reordered onto a different session.
 /// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BootstrapFinalizeRequest(
     [property: JsonPropertyName("nonce")] string Nonce,
     [property: JsonPropertyName("approve")] bool Approve);
@@ -71,7 +75,9 @@ public sealed record BootstrapFinalizeRequest(
 [JsonSerializable(typeof(BootstrapClientHello))]
 [JsonSerializable(typeof(BootstrapWireResult))]
 [JsonSerializable(typeof(BootstrapFinalizeRequest))]
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 public sealed partial class BootstrapWireJsonContext : JsonSerializerContext
 {
 }

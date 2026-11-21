@@ -75,7 +75,10 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             _stopOp, healthCredentials, stateStore, setupStore);
         AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
         // The PC check comes first and runs again on every run. Only Windows has a probe today;
-        // the other platforms are compile-only targets, so without a probe the run has no PC check.
+        // the other platforms are compile-only targets, so without a probe the run has no PC check
+        // and no Prepare step (Prepare installs QEMU and turns on the Windows features, both Windows work).
+        // Prepare follows the PC check because it acts on what the check found, and it is the only
+        // step that asks for administrator permission (KTD14).
         List<ISetupStep> steps = [];
         if (pcProbe is not null)
         {
@@ -85,6 +88,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
                 () => DownloadHosts.StillNeeded(manifest, KnownPaths.ApplianceDir),
                 extraDiskBytes: () => CompanyDataStep.GetExtraDiskBytes(
                     KnownPaths.ApplianceDir, setupStore, stateStore)));
+            steps.Add(new PrepareStep(runtimeResolver, setupStore));
         }
 
         steps.Add(new BuildStep(_buildOp, stateStore, setupStore));

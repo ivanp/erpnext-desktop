@@ -55,22 +55,34 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
     /// <c>Serpy.InstallerBootstrapper.exe</c>). Tests substitute this to exercise
     /// accept/decline/failure without a real UAC prompt. Returns the helper's exit
     /// code and reported staging directory, or throws
-    /// <see cref="System.ComponentModel.Win32Exception"/> on UAC decline (mirrors
-    /// <c>WhpxEnabler.EnableAndRequestRestart</c>).
+    /// <see cref="System.ComponentModel.Win32Exception"/> on UAC decline.
     /// </summary>
     internal Func<BootstrapRequest, CancellationToken, Task<IBootstrapSession>> BootstrapLauncher { get; set; }
         = DefaultBootstrapLauncher;
+
+    internal Func<bool, IProgress<string>?, CancellationToken, Task<InstallOutcome>>? InstallHandler { get; set; }
 
     /// <summary>
     /// Install the QEMU runtime. This is the <b>only</b> elevating entry point on this
     /// type — call only from the consented setup flow (IU2), never a lifecycle operation.
     /// No-ops (returns <see cref="InstallOutcome.AlreadyInstalled"/>) if already complete.
     /// </summary>
+    public Task<InstallOutcome> InstallAsync(
+        IProgress<string>? progress = null,
+        CancellationToken ct = default) =>
+        InstallAsync(enableWindowsFeatures: false, progress, ct);
+
     public async Task<InstallOutcome> InstallAsync(
+        bool enableWindowsFeatures,
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        if (IsInstalled())
+        if (InstallHandler is not null)
+        {
+            return await InstallHandler(enableWindowsFeatures, progress, ct);
+        }
+
+        if (IsInstalled() && !enableWindowsFeatures)
         {
             progress?.Report("QEMU runtime already installed.");
             return InstallOutcome.AlreadyInstalled;
@@ -78,7 +90,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
         if (!string.IsNullOrWhiteSpace(manifest.Windows.InstallerUrl))
             return await InstallFromNsisAsync(manifest.Windows.InstallerUrl,
-                manifest.Windows.InstallerSha256, progress, ct);
+                manifest.Windows.InstallerSha256, enableWindowsFeatures, progress, ct);
 
         if (string.IsNullOrEmpty(manifest.Windows.ArchiveUrl))
             throw new InvalidOperationException(
@@ -159,6 +171,7 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
     private async Task<InstallOutcome> InstallFromNsisAsync(
         string url, string expectedSha,
+        bool enableWindowsFeatures,
         IProgress<string>? progress, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(expectedSha))
@@ -185,7 +198,8 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
                 InstallerPath: installerPath,
                 PipeName: $"Serpy.InstallerBootstrapper.{Guid.NewGuid():N}",
                 Nonce: BootstrapProtocol.CreateNonce(),
-                ClaimedOriginalUserSid: CurrentUserSid());
+                ClaimedOriginalUserSid: CurrentUserSid(),
+                EnableWindowsFeatures: enableWindowsFeatures);
 
             progress?.Report("Waiting for administrator approval…");
             IBootstrapSession session;
@@ -195,14 +209,14 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
             }
             catch (System.ComponentModel.Win32Exception)
             {
-                // User declined UAC (mirrors WhpxEnabler.EnableAndRequestRestart).
+                // User declined UAC.
                 return InstallOutcome.ElevationDeclined;
             }
 
             await using (session)
             {
                 var staged = session.StagedResult;
-                if (staged.ExitCode != 0)
+                if (staged.ExitCode != 0 && staged.ExitCode != 3010)
                     throw new InvalidOperationException(
                         $"Elevated QEMU install failed with exit code {staged.ExitCode}.");
                 if (string.IsNullOrWhiteSpace(staged.StagingDir) || !Directory.Exists(staged.StagingDir))
@@ -239,13 +253,20 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
                 if (validationFailure is not null)
                     throw validationFailure;
-                if (finalResult.ExitCode != 0)
+                if (finalResult.ExitCode != 0 && finalResult.ExitCode != 3010)
                     throw new InvalidOperationException(
                         $"Elevated install approved locally but the helper's final ACL grant failed " +
                         $"with exit code {finalResult.ExitCode}.");
 
                 CommitValidatedBundle(stagingDir, BundleDir, manifest.QemuVersion, expectedSha);
                 progress?.Report($"QEMU runtime installed: {versionOutput!.Trim()}");
+                if (staged.DismExitCode == 3010 || finalResult.DismExitCode == 3010 ||
+                    staged.ExitCode == 3010 || finalResult.ExitCode == 3010 ||
+                    (OperatingSystem.IsWindows() && session is ElevatedInstallSession s && s.ProcessExitCode == 3010))
+                {
+                    return InstallOutcome.RestartRequired;
+                }
+
                 return InstallOutcome.Installed;
             }
         }
@@ -342,7 +363,8 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         try
         {
             return await ElevatedInstallChannel.ConnectAsync(
-                request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct, proc);
+                request.PipeName, request.Nonce, request.InstallerPath, TimeSpan.FromSeconds(60), ct, proc,
+                enableWindowsFeatures: request.EnableWindowsFeatures);
         }
         catch
         {
@@ -567,8 +589,10 @@ public enum InstallOutcome
 
     /// <summary>The user declined the UAC elevation prompt. No partial runtime was left behind.</summary>
     ElevationDeclined,
-}
 
+    /// <summary>Windows feature configuration requires a restart to take effect (exit code 3010).</summary>
+    RestartRequired,
+}
 /// <summary>
 /// Request handed to the elevated install bootstrapper. Carries no expected-hash
 /// field (the descriptor the bootstrapper trusts is authoritative — see IR3/IKTD3)
@@ -580,7 +604,8 @@ public sealed record BootstrapRequest(
     string InstallerPath,
     string PipeName,
     string Nonce,
-    string ClaimedOriginalUserSid);
+    string ClaimedOriginalUserSid,
+    bool EnableWindowsFeatures = false);
 
 /// <summary>
 /// Result reported by the elevated install bootstrapper over the authenticated
@@ -588,7 +613,7 @@ public sealed record BootstrapRequest(
 /// staging directory for the non-elevated resolver to run
 /// <c>ValidateContents</c>/<c>-version</c>/TLS against before committing.
 /// </summary>
-public sealed record BootstrapLaunchResult(int ExitCode, string? StagingDir);
+public sealed record BootstrapLaunchResult(int ExitCode, string? StagingDir, int? DismExitCode = null);
 
 /// <summary>
 /// A still-open elevated-install session (IR3): the launcher seam's return

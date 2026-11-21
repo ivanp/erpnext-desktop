@@ -110,6 +110,42 @@ public sealed class ElevatedInstallSessionTests
         await serverTask;
     }
 
+    [Fact]
+    public async Task ConnectAsync_WithEnableWindowsFeatures_SendsFeatureFlagAndReceivesDismExitCode()
+    {
+        var pipeName = $"serpy-session-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+
+        string? receivedHelloLine = null;
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            receivedHelloLine = await ReadLineAsync(server);
+            var staged = new BootstrapWireResult(0, "C:\\staged\\dir", null, DismExitCode: 3010);
+            await WriteLineAsync(server, JsonSerializer.Serialize(staged, BootstrapWireJsonContext.Default.BootstrapWireResult));
+        });
+
+        await using var session = await ElevatedInstallChannel.ConnectAsync(
+            pipeName, "n1", "C:\\fake\\installer.exe", TimeSpan.FromSeconds(5), CancellationToken.None,
+            enableWindowsFeatures: true);
+
+        await serverTask;
+
+        Assert.NotNull(receivedHelloLine);
+        var hello = JsonSerializer.Deserialize(receivedHelloLine, BootstrapWireJsonContext.Default.BootstrapClientHello);
+        Assert.NotNull(hello);
+        Assert.True(hello.EnableWindowsFeatures);
+        Assert.Equal(3010, session.StagedResult.DismExitCode);
+    }
+
+    [Fact]
+    public void BootstrapClientHello_WithUnknownField_ThrowsJsonException()
+    {
+        const string jsonWithUnknownField = "{\"nonce\":\"n1\",\"installerPath\":\"C:\\\\fake\",\"unknownField\":\"calc.exe\"}";
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize(jsonWithUnknownField, BootstrapWireJsonContext.Default.BootstrapClientHello));
+    }
+
     /// <summary>
     /// Minimal fake helper server: accepts one connection, reads the hello
     /// line (ignored -- this is testing the client, not authentication),

@@ -196,6 +196,17 @@ try
         return ExitShaMismatch;
     }
 
+    int? dismExitCode = null;
+    if (hello.EnableWindowsFeatures)
+    {
+        dismExitCode = await DismRunner.RunAsync(cts.Token);
+        if (dismExitCode != 0 && dismExitCode != 3010)
+        {
+            await WriteFailureResultAsync(server, $"DISM failed with exit code {dismExitCode}.", cts.Token, dismExitCode);
+            return ExitVendorLaunchFailed;
+        }
+    }
+
     // ── Stage entirely inside the admin-only ProgramData tree (IR3) ────────
     // The staging output is NEVER created under the requesting user's own
     // profile: that path is user-writable at every ancestor level, and no
@@ -262,7 +273,7 @@ try
     // validation over this SAME authenticated connection.
     StagingHardening.GrantReadOnlyAccess(stagingDir, claimedSid);
 
-    var stagedResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
+    var stagedResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null, DismExitCode: dismExitCode);
     await WriteResultAsync(server, stagedResult, cts.Token);
 
     // The caller's own validation (ValidateContents/-version/TLS probe)
@@ -310,9 +321,9 @@ try
     StagingHardening.HardenOwnership(stagingDir, claimedSid);
 
     succeeded = true;
-    var finalResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null);
+    var finalResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null, DismExitCode: dismExitCode);
     await WriteResultAsync(server, finalResult, cts.Token);
-    return 0;
+    return dismExitCode == 3010 ? 3010 : 0;
 }
 finally
 {
@@ -369,8 +380,8 @@ static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
     return Encoding.UTF8.GetString(buffer.ToArray());
 }
 
-static Task WriteFailureResultAsync(Stream stream, string errorMessage, CancellationToken ct) =>
-    WriteResultAsync(stream, new BootstrapWireResult(ExitCode: 1, StagingDir: null, ErrorMessage: errorMessage), ct);
+static Task WriteFailureResultAsync(Stream stream, string errorMessage, CancellationToken ct, int? dismExitCode = null) =>
+    WriteResultAsync(stream, new BootstrapWireResult(ExitCode: 1, StagingDir: null, ErrorMessage: errorMessage, DismExitCode: dismExitCode), ct);
 
 static async Task WriteResultAsync(Stream stream, BootstrapWireResult result, CancellationToken ct)
 {
@@ -734,5 +745,48 @@ internal static class StagingHardening
                 systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
             new FileInfo(path).SetAccessControl(security);
         }
+    }
+}
+
+internal static class DismRunner
+{
+    public static string SystemDismPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "dism.exe");
+
+    public static readonly string[] FixedFeatureArguments =
+    [
+        "/Online",
+        "/Quiet",
+        "/NoRestart",
+        "/Enable-Feature",
+        "/All",
+        "/FeatureName:HypervisorPlatform",
+        "/FeatureName:VirtualMachinePlatform"
+    ];
+
+    internal static Func<string, string[], CancellationToken, Task<int>>? TestExecutor { get; set; }
+
+    public static async Task<int> RunAsync(CancellationToken ct)
+    {
+        var dismPath = SystemDismPath;
+        if (TestExecutor is not null)
+        {
+            return await TestExecutor(dismPath, FixedFeatureArguments, ct);
+        }
+
+        var psi = new ProcessStartInfo(dismPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in FixedFeatureArguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start DISM.");
+        await proc.WaitForExitAsync(ct);
+        return proc.ExitCode;
     }
 }

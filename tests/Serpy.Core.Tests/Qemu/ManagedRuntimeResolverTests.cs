@@ -235,8 +235,8 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         {
             FinalizeCalls++;
             return Task.FromResult(approve
-                ? new BootstrapLaunchResult(0, StagedResult.StagingDir)
-                : new BootstrapLaunchResult(1, null));
+                ? new BootstrapLaunchResult(0, StagedResult.StagingDir, StagedResult.DismExitCode)
+                : new BootstrapLaunchResult(1, null, StagedResult.DismExitCode));
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -409,6 +409,39 @@ public sealed class ManagedRuntimeResolverTests : IDisposable
         {
             if (Directory.Exists(resolver.BundleDir)) Directory.Delete(resolver.BundleDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task InstallAsync_WithEnableWindowsFeatures_PassesFeatureFlagToBootstrapLauncher()
+    {
+        var installerPath = WriteInstallerSourceFile([1, 2, 3]);
+        using var sha = SHA256.Create();
+        var hash = Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(installerPath)));
+
+        BootstrapRequest? capturedRequest = null;
+        var resolver = new ManagedRuntimeResolver(new RuntimeManifest
+        {
+            QemuVersion = "11.1.0",
+            Windows = new RuntimeManifest.WindowsBundle
+            {
+                InstallerUrl = new Uri(installerPath).AbsoluteUri,
+                InstallerSha256 = hash,
+            },
+        })
+        {
+            BootstrapLauncher = (req, _) =>
+            {
+                capturedRequest = req;
+                // Throw decline so we don't need a real staging directory for this test
+                throw new System.ComponentModel.Win32Exception(1223, "Canceled");
+            },
+        };
+
+        var outcome = await resolver.InstallAsync(enableWindowsFeatures: true);
+
+        Assert.Equal(InstallOutcome.ElevationDeclined, outcome);
+        Assert.NotNull(capturedRequest);
+        Assert.True(capturedRequest.EnableWindowsFeatures);
     }
 
     [Fact]
