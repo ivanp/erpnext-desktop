@@ -56,7 +56,8 @@ main() {
   printf '%s\n' 'Package: mariadb-* libmariadb* libmariadbd* galera-4' 'Pin: origin archive.mariadb.org' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-mariadb
   apt-get update -q
   # One transaction keeps the MariaDB client libraries and the server on one source.
-  apt-get install -y git qemu-guest-agent nginx supervisor python3-pip build-essential libssl-dev libffi-dev libmysqlclient-dev libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev libcairo2-dev redis-server=5:8.0.2-3+deb13u2 mariadb-server=1:11.8.3+maria~deb13
+  # cron supplies the crontab command: bench init writes its backup schedule through it.
+  apt-get install -y git cron qemu-guest-agent nginx supervisor python3-pip build-essential libssl-dev libffi-dev libmysqlclient-dev libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev libcairo2-dev redis-server=5:8.0.2-3+deb13u2 mariadb-server=1:11.8.3+maria~deb13
 
   stage language-tools
   apt-get install -y -t sid python3.14=3.14.7-1 python3.14-dev=3.14.7-1 python3.14-venv=3.14.7-1
