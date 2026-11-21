@@ -127,3 +127,47 @@ Before it downloads the Debian base image or starts QEMU, `BuildOperation` resol
 | Redis | 8.0.2 | 8.0.2 | 8.0.0 | ✅ PASS |
 | Frappe | 16.31.0 | 16.31.0 | 16.0.0 | ✅ PASS |
 | ERPNext | 16.32.3 | 16.32.3 | 16.0.0 | ✅ PASS |
+
+---
+
+## Offline build proof (U13)
+
+*(Collected and installed on 2026-11-21 inside a Debian 13 QEMU/WHPX VM. That VM HAD internet access: the offline flags were set, but the network was not restricted. The restricted-network build is pending, see below.)*
+
+### Verdict: Partial — mechanisms exercised, restricted-network build NOT yet proven
+
+The collection VM installed the guest tools from local files (flat apt repo, wheelhouse, git mirrors, yarn offline mirror) and passed the version gate. No build has yet run with `restrict=on` and no guest connectivity, so R20 is not yet demonstrated. The proof run is repeated with the restricted network and recorded below when it completes.
+
+### 6-Component Version Gate (Verified In-Guest)
+
+| Component | Expected Lock | Measured Offline | Gate Floor | Status |
+|---|---|---|---|---|
+| **Python** | `3.14.7` | `Python 3.14.7` | `3.14.0` | ✅ PASS |
+| **Node.js** | `24.2.0` | `v24.2.0` | `24.0.0` | ✅ PASS |
+| **MariaDB** | `11.8.3` | `11.8.3-MariaDB` | `11.8.0` | ✅ PASS |
+| **Redis** | `8.0.2` | `Redis server v=8.0.2` | `8.0.0` | ✅ PASS |
+| **Frappe** | `16.31.0` (`6a329d068416768ec47ccd3326b9cc95a8d7bf99`) | `frappe 16.31.0 HEAD (6a329d0)` | `16.0.0` | ✅ PASS |
+| **ERPNext** | `16.32.3` (`11e0ba0a1c45f217e2e73e885f699102d06da325`) | `erpnext 16.32.3 HEAD (11e0ba0)` | `16.0.0` | ✅ PASS |
+
+### Key Technical Findings & Deviations from Online Script
+
+1. **`apt-ftparchive` Availability in Base Image:**
+   `apt-ftparchive` (`/usr/bin/apt-ftparchive`) is pre-installed in `debian-13-genericcloud-amd64-20260819-2575.qcow2` as part of `apt-utils`. `dpkg-scanpackages` is missing. The base image can index local deb pools directly without shipping a pre-generated `Packages.gz` in git.
+
+2. **Single Flat Deb Repository:**
+   A single flat repository (`deb [trusted=yes] file:/srv/cache/debs ./`) contains all 244 required debs (Trixie packages, Sid Python 3.14, and MariaDB 11.8.3). Release pinning is unnecessary offline since the cache contains only the target versions.
+
+3. **Drop `-t sid` Offline:**
+   `apt-get install -y -t sid python3.14=3.14.7-1 ...` fails in a flat file repo because flat repositories do not have release suite metadata. Dropping `-t sid` in the offline install (`apt-get install -y python3.14=3.14.7-1 ...`) succeeds unconditionally.
+
+4. **Pre-built CPython 3.14 Wheels for C Extensions:**
+   `mysqlclient==2.2.7` and `psutil==7.0.0` build C extensions. Pre-building Linux x86_64 wheels (`mysqlclient-2.2.7-cp314-cp314-linux_x86_64.whl` and `psutil-7.0.0-cp36-abi3-manylinux...whl`) into the wheelhouse eliminates offline build-backend failures when pip/uv operates with `--no-index`.
+
+5. **Git pyproject URL Rewriting:**
+   Setting `[url "file:///srv/cache/git/<repo>.git"] insteadOf = https://github.com/frappe/<repo>` in `/etc/gitconfig` allows pip and uv to resolve git-pinned dependencies (`pypika`, `gunicorn`) from local bare mirrors without modifying `pyproject.toml`.
+
+6. **Yarn Offline Mirror:**
+   Configuring `yarn-offline-mirror "/srv/cache/yarn-mirror"` and `--install.offline true` in `/home/frappe/.yarnrc` allows `yarn install --frozen-lockfile` to install all 954 frontend packages across Frappe, ERPNext, and ERPNext Banking in under 16 seconds without network requests.
+
+7. **Environment Inheritance Across `su - frappe`:**
+   `su - frappe` clears environment variables. Exporting offline flags in `/etc/profile.d/serpy-offline.sh` and `/etc/serpy-offline.env` ensures `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=/srv/cache/wheels`, `UV_NO_INDEX=1`, and `UV_FIND_LINKS=/srv/cache/wheels` persist across all child bench invocations.
