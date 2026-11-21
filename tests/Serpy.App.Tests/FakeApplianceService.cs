@@ -66,6 +66,24 @@ public sealed class FakeApplianceService : IApplianceService
         return Task.FromResult(Ok(OperationKind.Reset));
     }
 
+    public Task<SetupResult> RunSetupAsync(
+        SetupRequest request, IProgress<SetupUpdate> progress, CancellationToken ct = default)
+    {
+        SetupRequests.Add(request);
+        return Task.FromResult(new SetupResult(
+            Guid.NewGuid(), OperationOutcome.Success, FailureCode.None, null, "Setup is finished.", []));
+    }
+
+    public List<SetupRequest> SetupRequests { get; } = [];
+    public int KeepWaitingCalls { get; private set; }
+    public int TryAgainCalls { get; private set; }
+
+    public void KeepWaiting() => KeepWaitingCalls++;
+
+    public void TryAgainStep() => TryAgainCalls++;
+
+    public string ComposeSetupDetails() => "details";
+
     public Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default)
         => Task.FromResult(Status);
 

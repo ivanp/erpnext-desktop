@@ -222,4 +222,24 @@ public sealed class ProvisionMonitorTests
         Assert.Equal("services", outcome.Stage);
         Assert.Equal(5, outcome.GuestExitCode);
     }
+
+    [Fact]
+    public async Task LinesThatExplainAFailure_AreStillDeliveredAfterTheFailedMarker()
+    {
+        var rig = new Rig();
+        var received = new List<string>();
+        rig.Monitor.LineReceived += l => { lock (received) received.Add(l); };
+        var run = rig.Run();
+
+        rig.Say("SERPY_PROVISION_STARTED");
+        rig.Say("SERPY_STAGE database");
+        rig.Say("SERPY_PROVISION_FAILED database 100");
+        rig.Say("The following packages have unmet dependencies:"); // apt prints this after its header
+
+        var outcome = await Finish(run);
+
+        Assert.Equal("database", outcome.Stage);
+        Assert.Equal(100, outcome.GuestExitCode);
+        lock (received) Assert.Contains("The following packages have unmet dependencies:", received);
+    }
 }

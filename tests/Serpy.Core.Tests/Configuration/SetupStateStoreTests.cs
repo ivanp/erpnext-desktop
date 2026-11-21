@@ -1,4 +1,5 @@
 using Serpy.Core.Configuration;
+using Serpy.Core.Contracts;
 
 namespace Serpy.Core.Tests.Configuration;
 
@@ -75,5 +76,85 @@ public sealed class SetupStateStoreTests : IDisposable
         Assert.False(Directory.Exists(_dir));
         MakeStore().Write(new SetupState { RestartRequired = true });
         Assert.True(File.Exists(StatePath));
+    }
+
+    [Fact]
+    public void ASchema1File_LoadsAsSchema2WithDefaults_AndKeepsItsRestartFlag()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{\"schemaVersion\":1,\"restartRequired\":true}");
+
+        var state = MakeStore().Read();
+
+        Assert.Equal(2, state.SchemaVersion);
+        Assert.True(state.RestartRequired);
+        Assert.True(state.StartAtSignIn);
+        Assert.Equal(CompanyDataRoute.Undecided, state.CompanyDataRoute);
+        Assert.False(state.Finished);
+        Assert.Equal(FailureCode.None, state.LastFailure);
+        Assert.Empty(state.Steps);
+    }
+
+    [Fact]
+    public void ACorruptFile_IsTreatedAsFresh_AndTheEventIsReported()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{ not json");
+        var store = MakeStore();
+        var problems = new List<string>();
+        store.Problem += problems.Add;
+
+        var state = store.Read();
+
+        Assert.False(state.RestartRequired);
+        Assert.False(state.Finished);
+        var problem = Assert.Single(problems);
+        Assert.Contains("fresh state", problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFileOfAnUnknownSchema_IsTreatedAsFresh_AndTheEventIsReported()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(StatePath, "{\"schemaVersion\":999,\"restartRequired\":true,\"finished\":true}");
+        var store = MakeStore();
+        var problems = new List<string>();
+        store.Problem += problems.Add;
+
+        var state = store.Read();
+
+        Assert.False(state.RestartRequired);
+        Assert.False(state.Finished);
+        Assert.Single(problems);
+    }
+
+    [Fact]
+    public void TheSetupFields_RoundTrip()
+    {
+        MakeStore().Write(new SetupState
+        {
+            StartAtSignIn = false,
+            CompanyDataRoute = CompanyDataRoute.AdoptExisting,
+            Finished = true,
+            LastFailure = FailureCode.DiskFull,
+            LastFailedStep = SetupStepId.Download,
+            Steps = new() { [SetupStepId.Build] = SetupStepState.Done, [SetupStepId.Start] = SetupStepState.Failed },
+        });
+
+        var read = MakeStore().Read();
+
+        Assert.False(read.StartAtSignIn);
+        Assert.Equal(CompanyDataRoute.AdoptExisting, read.CompanyDataRoute);
+        Assert.True(read.Finished);
+        Assert.Equal(FailureCode.DiskFull, read.LastFailure);
+        Assert.Equal(SetupStepId.Download, read.LastFailedStep);
+        Assert.Equal(SetupStepState.Done, read.Steps[SetupStepId.Build]);
+        Assert.Equal(SetupStepState.Failed, read.Steps[SetupStepId.Start]);
+    }
+
+    [Fact]
+    public void AFreshState_IsOnForStartAtSignIn()
+    {
+        Assert.True(new SetupState().StartAtSignIn);
     }
 }

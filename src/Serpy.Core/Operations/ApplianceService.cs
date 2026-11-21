@@ -4,6 +4,7 @@ using Serpy.Core.Coordination;
 using Serpy.Core.Health;
 using Serpy.Core.Images;
 using Serpy.Core.Qemu;
+using Serpy.Core.Setup;
 using Serpy.Core.Versions;
 
 namespace Serpy.Core.Operations;
@@ -27,6 +28,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
     private readonly InspectArchiveOperation _inspectArchiveOp;
     private readonly AdoptOperation _adoptOp;
     private readonly ResetOperation _resetOp;
+    private readonly SetupOperation _setupOp;
 
     public ApplianceService(
         ManagedRuntimeResolver runtimeResolver,
@@ -37,11 +39,13 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         HealthCredentials healthCredentials,
         StateStore stateStore,
         VersionManifest manifest,
-        ApplianceSettings settings)
+        ApplianceSettings settings,
+        IPowerRequest? powerRequest = null)
     {
         _stateStore = stateStore;
         _lock      = new LifecycleLock();
-        _statusOp  = new StatusOperation(stateStore);
+        var setupStore = new SetupStateStore();
+        _statusOp  = new StatusOperation(stateStore, setupStore, () => _setupOp?.IsWorking ?? false);
         _buildOp   = new BuildOperation(
             imageDownloader, new PackageClosurePreflight(manifest), seedWriter, imageTool,
             runtimeResolver, certStore, stateStore, manifest, settings);
@@ -59,8 +63,17 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             imageTool, runtimeResolver, certStore,
             healthCredentials, stateStore, manifest, settings);
         _resetOp   = new ResetOperation(
-            _stopOp, healthCredentials, stateStore, new SetupStateStore());
+            _stopOp, healthCredentials, stateStore, setupStore);
         AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
+        _setupOp   = new SetupOperation(
+            [
+                new BuildStep(_buildOp, stateStore),
+                new CompanyDataStep(_initOp, stateStore),
+                new StartStep(_startOp, stateStore),
+            ],
+            setupStore, stateStore, powerRequest ?? NoPowerRequest.Instance,
+            () => AdoptOperation.ReconcileJournal(stateStore, healthCredentials),
+            manifest: manifest);
     }
 
     // ── Status (non-mutating, no lock) ────────────────────────────────────────
@@ -178,6 +191,24 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             return await _adoptOp.ExecuteAsync(
                 Guid.NewGuid(), parameters, inspection, legacyConsentApproved, progress, ct);
     }
+    public async Task<SetupResult> RunSetupAsync(
+        SetupRequest request,
+        IProgress<SetupUpdate> progress, CancellationToken ct = default)
+    {
+        var lease = _lock.TryAcquire(TimeSpan.Zero);
+        if (lease is null)
+            return new SetupResult(Guid.NewGuid(), OperationOutcome.Failure, FailureCode.Unknown, null,
+                "Another operation is already in progress. Wait for it to complete.", []);
+        using (lease)
+            return await _setupOp.RunAsync(request, progress, ct);
+    }
+
+    public void KeepWaiting() => _setupOp.KeepWaiting();
+
+    public void TryAgainStep() => _setupOp.TryAgainStep();
+
+    public string ComposeSetupDetails() => _setupOp.ComposeDetails();
+
     public async Task<OperationResult> ResetAsync(
         IProgress<OperationUpdate> progress, CancellationToken ct = default)
     {

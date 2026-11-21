@@ -46,7 +46,8 @@ public sealed record ApplianceStatus(
     bool HasCommittedDataOnDisk = false,
     bool ArchiveHasProvenanceRecord = false,
     LaunchRoute RecommendedRoute = LaunchRoute.Start,
-    string? LogPath = null);
+    string? LogPath = null,
+    SetupSummary? Setup = null);
 
 public enum OperationKind
 {

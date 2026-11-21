@@ -82,6 +82,34 @@ public sealed class ProvisionMonitor(
             return null;
         }
 
+        // After a failure the guest may still be printing the lines that explain it (package
+        // manager errors arrive late). Keep reading for a short time so the log holds them.
+        async Task DrainAsync()
+        {
+            using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var grace = Task.Delay(_exitGrace, graceCts.Token);
+            try
+            {
+                while (await Task.WhenAny(next, grace) == next)
+                {
+                    bool more;
+                    try { more = await next; }
+                    catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+                    {
+                        break;
+                    }
+                    if (!more) break;
+
+                    LineReceived?.Invoke(e.Current);
+                    next = e.MoveNextAsync().AsTask();
+                }
+            }
+            finally
+            {
+                graceCts.Cancel();
+            }
+        }
+
         try
         {
             while (true)
@@ -107,7 +135,11 @@ public sealed class ProvisionMonitor(
                             "The guest console closed before provisioning finished.", stage);
 
                     var outcome = Interpret(e.Current);
-                    if (outcome is not null) return outcome;
+                    if (outcome is not null)
+                    {
+                        if (!outcome.Succeeded) await DrainAsync();
+                        return outcome;
+                    }
 
                     next = e.MoveNextAsync().AsTask();
                     continue;

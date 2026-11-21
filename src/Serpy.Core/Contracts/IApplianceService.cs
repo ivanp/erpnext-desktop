@@ -94,6 +94,25 @@ public interface IApplianceService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Runs the whole setup from the first step to Ready (KTD6). Takes the lifecycle lease once for
+    /// the whole run, so every other mutation returns the busy result meanwhile. Steps whose result
+    /// already exists are skipped, so an interrupted run resumes where it stopped.
+    /// </summary>
+    Task<SetupResult> RunSetupAsync(
+        SetupRequest request,
+        IProgress<SetupUpdate> progress,
+        CancellationToken ct = default);
+
+    /// <summary>The user chose Keep waiting on a step that went quiet: the timer starts again.</summary>
+    void KeepWaiting();
+
+    /// <summary>The user chose Try again on a step that went quiet: the step starts over.</summary>
+    void TryAgainStep();
+
+    /// <summary>The Save details text for the latest setup run. It never holds a credential.</summary>
+    string ComposeSetupDetails();
+
+    /// <summary>
     /// Non-mutating status read. Never acquires the lifecycle lease.
     /// </summary>
     Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default);

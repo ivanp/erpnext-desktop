@@ -10,7 +10,10 @@ namespace Serpy.Core.Operations;
 /// Reconciles stale PID: if the recorded QEMU process is gone, marks state Crashed.
 /// Reports readiness + health as a single typed ApplianceStatus.
 /// </summary>
-public sealed class StatusOperation(StateStore stateStore)
+public sealed class StatusOperation(
+    StateStore stateStore,
+    SetupStateStore? setupStore = null,
+    Func<bool>? setupWorking = null)
 {
     public Task<ApplianceStatus> GetStatusAsync(CancellationToken ct = default)
     {
@@ -69,7 +72,15 @@ public sealed class StatusOperation(StateStore stateStore)
             HasCommittedDataOnDisk:      hasCommittedData,
             ArchiveHasProvenanceRecord:  archiveHasProvenance,
             RecommendedRoute:            route,
-            LogPath:                     state.LogPath);
+            LogPath:                     state.LogPath,
+            Setup:                       ReadSetupSummary());
         return Task.FromResult(status);
+    }
+
+    private SetupSummary? ReadSetupSummary()
+    {
+        if (setupStore is null) return null;
+        var setup = setupStore.Read();
+        return new SetupSummary(setup.Finished, setupWorking?.Invoke() ?? false, setup.LastFailure);
     }
 }

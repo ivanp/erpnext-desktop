@@ -22,6 +22,12 @@ main() {
   set -e
   export DEBIAN_FRONTEND=noninteractive
 
+  # No package may start a service while the image is built. mariadb and supervisor require the
+  # data disk (their serpy-data drop-ins), which does not exist yet, so a start would fail and
+  # abort the install. Policy 101 means "not allowed" and invoke-rc.d then reports success.
+  printf '%s\n' '#!/bin/sh' 'exit 101' > /usr/sbin/policy-rc.d
+  chmod 0755 /usr/sbin/policy-rc.d
+
   stage os-packages
   # All Debian packages resolve from this immutable archive snapshot. Trixie
   # supplies Redis 8.0.2; the manifest records that exact available version.
@@ -32,6 +38,10 @@ main() {
   # packages retain the trixie candidate priority.
   printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ sid main' > /etc/apt/sources.list.d/serpy-python314.list
   printf '%s\n' 'Package: *' 'Pin: release a=unstable' 'Pin-Priority: 1' '' 'Package: python3.14 python3.14-dev python3.14-venv libpython3.14 libpython3.14-minimal libpython3.14-stdlib libpython3.14-dev' 'Pin: release a=unstable' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-python314
+  # The base image already carries the security-updated runtime libraries, so the matching -dev
+  # packages must come from the same snapshot's security and updates suites.
+  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260822T000000Z/ trixie-security main' > /etc/apt/sources.list.d/serpy-trixie-security.list
+  printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ trixie-updates main' > /etc/apt/sources.list.d/serpy-trixie-updates.list
   apt-get update -q
   apt-get install -y curl
 
@@ -41,14 +51,22 @@ main() {
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://supplychain.mariadb.com/mariadb-keyring-2025.gpg -o /etc/apt/keyrings/mariadb-keyring.gpg
   printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/mariadb-keyring.gpg] https://archive.mariadb.org/mariadb-11.8.3/repo/debian trixie main' > /etc/apt/sources.list.d/serpy-mariadb.list
+  # Debian ships a newer MariaDB client than the pinned 11.8.3 server and would win on version
+  # number, and that client breaks the pinned server. Every MariaDB package comes from its own repo.
+  printf '%s\n' 'Package: mariadb-* libmariadb* libmariadbd* galera-4' 'Pin: origin archive.mariadb.org' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-mariadb
   apt-get update -q
   # One transaction keeps the MariaDB client libraries and the server on one source.
   apt-get install -y git qemu-guest-agent nginx supervisor python3-pip build-essential libssl-dev libffi-dev libmysqlclient-dev libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev libcairo2-dev redis-server=5:8.0.2-3+deb13u2 mariadb-server=1:11.8.3+maria~deb13
 
   stage language-tools
   apt-get install -y -t sid python3.14=3.14.7-1 python3.14-dev=3.14.7-1 python3.14-venv=3.14.7-1
-  python3.14 -m ensurepip --upgrade
-  python3.14 -m pip install --no-cache-dir frappe-bench==5.31.0
+  # Debian disables ensurepip and pip for the system Python, so the bench command lives in its
+  # own virtual environment and is linked onto the PATH for every user.
+  python3.14 -m venv /opt/serpy-tools
+  /opt/serpy-tools/bin/pip install --no-cache-dir frappe-bench==5.31.0
+  # bench runs uv to create the bench environment, and it finds uv on the PATH of the frappe user.
+  ln -sf /opt/serpy-tools/bin/bench /usr/local/bin/bench
+  ln -sf /opt/serpy-tools/bin/uv /usr/local/bin/uv
   # Node's official archive is pinned by both versioned URI and published SHA-256.
   curl -fsSLo /tmp/node.tar.xz https://nodejs.org/dist/v24.2.0/node-v24.2.0-linux-x64.tar.xz
   echo '91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  /tmp/node.tar.xz' | sha256sum -c -
@@ -69,16 +87,29 @@ main() {
   nginx -t
   su - frappe -c "cd /home/frappe/frappe-bench && bench setup supervisor"
   cp /home/frappe/frappe-bench/config/supervisor.conf /etc/supervisor/conf.d/frappe.conf
-  supervisorctl reread
-  supervisorctl update
+  # supervisor does not run while the image is built (it needs the data disk), so there is nothing
+  # to reread. It reads conf.d/frappe.conf when it first starts on the initialized appliance.
   systemctl daemon-reload
   systemctl disable mariadb.service supervisor.service
+
+  # The guest agent was installed while starts were denied, and the host needs it for the
+  # version check that follows. It is the only service that has to run now.
+  rm -f /usr/sbin/policy-rc.d
+  systemctl start qemu-guest-agent
+}
+
+# Each line goes to the serial device through a fresh open. A handle that stays open (tee did)
+# gets "Input/output error" once the host connects its console, and every later line is lost,
+# which hides the very error the host needs. The same lines go to a file inside the guest.
+serial_line() {
+  printf '%s\n' "$1" >> /var/log/serpy-provision.log 2>/dev/null || true
+  printf '%s\n' "$1" > "$SERIAL" 2>/dev/null || true
 }
 
 mark SERPY_PROVISION_STARTED
 echo unknown > "$STAGE_FILE"
 
-main 2>&1 | tee -a "$SERIAL"
+main 2>&1 | while IFS= read -r line || [ -n "$line" ]; do serial_line "$line"; done
 rc=${PIPESTATUS[0]}
 
 if [ "$rc" -ne 0 ]; then
