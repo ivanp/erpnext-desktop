@@ -1,0 +1,64 @@
+name: Generate Build Inputs
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_changes:
+        description: 'Whether to create a PR or commit generated build-inputs.json'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  generate:
+    name: Generate Pinned Build Inputs Closure
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+
+    steps:
+      - name: Install git and ca-certificates
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run generate-build-inputs.sh
+        run: |
+          chmod +x eng/lock/generate-build-inputs.sh
+          ./eng/lock/generate-build-inputs.sh --output config/build-inputs.json
+
+      - name: Upload build-inputs.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-inputs
+          path: config/build-inputs.json
+          if-no-files-found: error
+          retention-days: 14
+
+  validate:
+    name: Validate Build Inputs (.NET Tests)
+    runs-on: windows-latest
+    needs: generate
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download generated build-inputs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-inputs
+          path: config/
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run BuildInputsTests
+        run: |
+          dotnet test tests/Serpy.Core.Tests -c Release `
+            --filter "FullyQualifiedName~BuildInputsTests" `
+            --logger "console;verbosity=normal"

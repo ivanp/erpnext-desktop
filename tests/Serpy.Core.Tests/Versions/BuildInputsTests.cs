@@ -9,7 +9,7 @@ public sealed class BuildInputsTests
     /// When true, allows parts in the shipped build-inputs.json to have empty file lists.
     /// The generator unit (U14 generator half) flips this to false when real closures are committed.
     /// </summary>
-    private static readonly bool AllowPlaceholderParts = true;
+    private static readonly bool AllowPlaceholderParts = false;
 
     [Fact]
     public void ShippedBuildInputs_LoadsAndMeetsBasicInvariants()
