@@ -46,6 +46,12 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
     private static bool IsCleanWorkflow =>
         Environment.GetEnvironmentVariable("SERPY_RUN_CLEAN_WORKFLOW") == "1";
 
+    // Continue from an accepted system image: skip Build and run Initialize and the tests. A full
+    // build takes about 12 minutes, so this is how a failure after the build is iterated on. A run
+    // for the record still starts from an empty workspace.
+    private static bool ResumeFromBuilt =>
+        Environment.GetEnvironmentVariable("SERPY_RESUME_FROM_BUILT") == "1";
+
     public async Task InitializeAsync()
     {
         // Early-out when the opt-in flag is absent — no validation, no construction.
@@ -104,15 +110,23 @@ public sealed class ApplianceWorkflowFixture : IAsyncLifetime
         if (IsCleanWorkflow)
         {
             Directory.CreateDirectory(KnownPaths.ApplianceDir);
-            if (Directory.EnumerateFileSystemEntries(KnownPaths.ApplianceDir).Any())
+            var resuming = ResumeFromBuilt && StateStore.Read().Readiness == ReadinessState.Built;
+            if (!resuming && Directory.EnumerateFileSystemEntries(KnownPaths.ApplianceDir).Any())
                 throw new InvalidOperationException(
                     $"SERPY_RUN_CLEAN_WORKFLOW=1 requires an empty appliance workspace: {KnownPaths.ApplianceDir}");
 
             var progress = new Progress<OperationUpdate>(u => Console.WriteLine($"[{u.Stage}] {u.Message}"));
             using var cts = new CancellationTokenSource(TimeSpan.FromHours(3));
-            var build = await Service.BuildAsync(progress, cts.Token);
-            if (build.Outcome != OperationOutcome.Success)
-                throw new InvalidOperationException($"Clean workflow Build failed: {build.Message}");
+            if (resuming)
+            {
+                Console.WriteLine("[resume] Using the accepted system image; Build is skipped.");
+            }
+            else
+            {
+                var build = await Service.BuildAsync(progress, cts.Token);
+                if (build.Outcome != OperationOutcome.Success)
+                    throw new InvalidOperationException($"Clean workflow Build failed: {build.Message}");
+            }
 
             var init = await Service.InitializeAsync(
                 new InitializationParameters(SiteName, AdminPassword), progress, cts.Token);
