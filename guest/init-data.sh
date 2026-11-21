@@ -96,9 +96,28 @@ systemctl start mariadb
 # documented internal implementation avoids serialising the secret into argv
 # while preserving the production site-creation path. The explicit new-site
 # context permits the absent site_config.json; _new_site then retains it.
+#
+# Frappe connects to MariaDB as a superuser to create the site's database and its own user. On Debian
+# and in mariadb-install-db's default, root@localhost authenticates through the unix socket as the
+# operating system root, so the frappe user cannot use it, and with no password frappe stops to ask
+# for one on a terminal that does not exist. A temporary superuser with a random password is created
+# for this one call and dropped when it ends, whatever the outcome. The password travels in the
+# environment of the Python process only (not argv, not a file), and the Python code removes it from
+# there as it hands it over.
 log "Creating Frappe site: $SITE_NAME"
-cd "$FRAPPE_DIR"
-runuser -u "$FRAPPE_USER" -- "$FRAPPE_DIR/env/bin/python" -c '
+# bench starts relative to the sites directory: frappe opens its log files at ../logs from there.
+cd "$FRAPPE_DIR/sites"
+SETUP_DB_USER="serpy_setup"
+SETUP_DB_SECRET="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+drop_setup_user() {
+    mariadb -e "DROP USER IF EXISTS '${SETUP_DB_USER}'@'localhost'; DROP USER IF EXISTS '${SETUP_DB_USER}'@'127.0.0.1';" || true
+}
+trap drop_setup_user EXIT
+printf "CREATE OR REPLACE USER '%s'@'localhost' IDENTIFIED BY '%s';\nCREATE OR REPLACE USER '%s'@'127.0.0.1' IDENTIFIED BY '%s';\nGRANT ALL PRIVILEGES ON *.* TO '%s'@'localhost' WITH GRANT OPTION;\nGRANT ALL PRIVILEGES ON *.* TO '%s'@'127.0.0.1' WITH GRANT OPTION;\n" \
+    "$SETUP_DB_USER" "$SETUP_DB_SECRET" "$SETUP_DB_USER" "$SETUP_DB_SECRET" "$SETUP_DB_USER" "$SETUP_DB_USER" | mariadb
+SETUP_DB_SECRET="$SETUP_DB_SECRET" SETUP_DB_USER="$SETUP_DB_USER" \
+runuser -u "$FRAPPE_USER" -w SETUP_DB_SECRET,SETUP_DB_USER -- "$FRAPPE_DIR/env/bin/python" -c '
+import os
 import sys
 import frappe
 from frappe.installer import _new_site
@@ -111,10 +130,30 @@ frappe.init(site, sites_path="/home/frappe/frappe-bench/sites", new_site=True)
 _new_site(
     None,
     site,
-    db_root_username="root",
+    db_root_username=os.environ.pop("SETUP_DB_USER"),
+    db_root_password=os.environ.pop("SETUP_DB_SECRET"),
     admin_password=password,
 )
 ' "$SITE_NAME"
+drop_setup_user
+trap - EXIT
+
+# -- Bench services ---------------------------------------------------------
+# The bench runs its own redis servers (the cache on 13000 and the queue on 11000) as programs of
+# supervisor, and installing an app talks to them. Nothing else starts supervisor during this
+# script, because the image disables it until the data disk exists. It reads the bench programs
+# from conf.d/frappe.conf, which the image build wrote.
+log "Starting the bench services…"
+systemctl start supervisor
+for _ in $(seq 1 60); do
+    if ss -ltn | grep -q ":11000 " && ss -ltn | grep -q ":13000 "; then break; fi
+    sleep 1
+done
+if ! ss -ltn | grep -q ":11000 " || ! ss -ltn | grep -q ":13000 "; then
+    echo "ERROR: the bench redis servers did not start within 60 seconds." >&2
+    supervisorctl status >&2 || true
+    exit 1
+fi
 
 log "Installing ERPNext on $SITE_NAME…"
 run_bench --site "$SITE_NAME" install-app erpnext
@@ -123,8 +162,22 @@ run_bench use "$SITE_NAME"
 
 # -- Production config ------------------------------------------------------
 log "Regenerating nginx configuration…"
-run_bench setup nginx
+# The image build already wrote nginx.conf, and bench asks before it overwrites one. Nobody answers
+# on a guest agent call, so the question aborts the script; --yes is its documented answer.
+# --logging none: the default asks for a log format named "main" that Debian's nginx.conf does not
+# define, and nginx then refuses the whole configuration.
+run_bench setup nginx --yes --logging none
 cp "$FRAPPE_DIR/config/nginx.conf" /etc/nginx/conf.d/frappe.conf
+
+# nginx runs as www-data and serves the built assets straight from the bench, so it must be able to
+# walk through the home directory of frappe (x only: it cannot list it). Without that every asset
+# answers 404 and the page has no styles or scripts.
+chmod 0711 "$(getent passwd "$FRAPPE_USER" | cut -d: -f6)"
+
+# The ERPNext site is the only site on this machine, and the browser reaches it as 127.0.0.1:<port>,
+# not under its site name. Debian's default site would answer that address with its welcome page, so
+# it is removed and the bench site takes every request.
+rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
 # Enable appliance target so services start on next normal boot.

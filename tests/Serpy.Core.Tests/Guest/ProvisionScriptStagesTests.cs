@@ -22,4 +22,17 @@ public sealed class ProvisionScriptStagesTests
 
         Assert.Equal(ExpectedStages, stages);
     }
+
+    [Fact]
+    public void TheMariaDbClientLibraryIsMariaDbs_NotOraclesLibmysqlclient()
+    {
+        // Measured on the first real Initialize: the Python mysqlclient module built against Oracle libmysqlclient
+        // cannot load the mysql_native_password plugin that MariaDB accounts use, so no login works.
+        var script = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "guest", "provision.sh"));
+        var installLine = script.Split('\n').Single(l => l.Contains("apt-get install -y git cron", StringComparison.Ordinal));
+
+        Assert.Contains("libmariadb-dev", installLine, StringComparison.Ordinal);
+        Assert.Contains("libmariadb-dev-compat", installLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("libmysqlclient-dev", installLine, StringComparison.Ordinal);
+    }
 }

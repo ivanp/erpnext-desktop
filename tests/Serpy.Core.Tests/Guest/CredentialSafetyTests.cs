@@ -76,6 +76,55 @@ public sealed class CredentialSafetyTests
     }
 
     [Fact]
+    public void InitDataScript_CreatesTheSiteThroughATemporarySuperuser_ThatIsAlwaysDropped()
+    {
+        // root@localhost authenticates through the unix socket as the OS root, so the frappe user cannot use it, and
+        // with no password frappe prompts on a terminal that does not exist (measured on the first real Initialize).
+        var script = File.ReadAllText(ScriptPath);
+        var create = script.IndexOf("CREATE OR REPLACE USER", StringComparison.Ordinal);
+        var trap = script.IndexOf("trap drop_setup_user EXIT", StringComparison.Ordinal);
+        var use = script.IndexOf("db_root_password=os.environ.pop(\"SETUP_DB_SECRET\")", StringComparison.Ordinal);
+        var drop = script.LastIndexOf("drop_setup_user", StringComparison.Ordinal);
+
+        Assert.True(trap >= 0 && trap < create, "The drop must be armed before the account exists, so a failure cannot leave it behind.");
+        Assert.True(create < use, "The account is created before frappe uses it.");
+        Assert.True(drop > use, "The account is dropped after frappe has used it.");
+        Assert.DoesNotContain("db_root_username=\"root\"", script);
+    }
+
+    [Fact]
+    public void InitDataScript_NeverPutsTheSetupSecretInAFileOrAnArgument()
+    {
+        var script = File.ReadAllText(ScriptPath);
+
+        Assert.Contains("SETUP_DB_SECRET=\"$SETUP_DB_SECRET\" SETUP_DB_USER=\"$SETUP_DB_USER\"", script);
+        Assert.Contains("os.environ.pop(\"SETUP_DB_SECRET\")", script);
+        Assert.DoesNotContain("--db-root-password", script);
+        Assert.DoesNotContain("> /tmp/", script);
+    }
+
+    [Fact]
+    public void InitDataScript_StartsTheBenchServices_BeforeItInstallsTheApp()
+    {
+        var script = File.ReadAllText(ScriptPath);
+        var start = script.IndexOf("systemctl start supervisor", StringComparison.Ordinal);
+        var install = script.IndexOf("install-app erpnext", StringComparison.Ordinal);
+
+        Assert.True(start >= 0 && start < install, "Installing an app talks to the bench redis servers, which supervisor runs.");
+    }
+
+    [Fact]
+    public void InitDataScript_ConfiguresNginxForABrowserOnTheLoopback()
+    {
+        var script = File.ReadAllText(ScriptPath);
+
+        Assert.Contains("setup nginx --yes --logging none", script);   // no prompt, and no undefined log format
+        Assert.Contains("chmod 0711", script);                          // www-data must be able to reach the assets
+        Assert.Contains("rm -f /etc/nginx/sites-enabled/default", script); // the browser uses 127.0.0.1, not the site name
+        Assert.Contains("setup nginx --yes --logging none", File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "guest", "recover.sh")));
+    }
+
+    [Fact]
     public void InitDataScript_SeedsTheBenchFilesFromTheImage_BeforeTheEmptySitesTreeIsBound()
     {
         // The bind mount hides the sites/ directory of the image. apps.txt, common_site_config.json and

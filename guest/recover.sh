@@ -43,7 +43,7 @@ log "Rebuilding the assets for the new system image…"
 su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench build --production"
 
 # Regenerate nginx config for the new system.
-su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench setup nginx"
+su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench setup nginx --yes --logging none"
 cp "$FRAPPE_DIR/config/nginx.conf" /etc/nginx/conf.d/frappe.conf
 nginx -t && systemctl reload nginx
 
