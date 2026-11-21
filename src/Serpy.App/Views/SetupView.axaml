@@ -151,6 +151,24 @@
       <TextBlock Classes="muted" Text="{x:Static ui:UiText.DownloadsMostlyCached}" TextWrapping="Wrap" />
       <TextBlock Name="CachedPartsText" Text="{Binding CachedPartsLine}" TextWrapping="Wrap" />
       <views:Strip />
+      <ItemsControl ItemsSource="{Binding DownloadParts}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:DownloadPartItem">
+            <Border Margin="0,2" Padding="4,2">
+              <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{Binding Title}" FontWeight="Medium" />
+                  <TextBlock Text="{Binding FileCountText}" Classes="muted" IsVisible="{Binding ShowFileCount}" />
+                </StackPanel>
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding StateText}" Classes="muted" HorizontalAlignment="Right" />
+                <ProgressBar Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Height="4" Margin="0,4,0,0"
+                             Minimum="0" Maximum="100" Value="{Binding Percent}"
+                             IsIndeterminate="{Binding IsIndeterminate}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
       <views:DetailsPanel />
     </StackPanel>
 

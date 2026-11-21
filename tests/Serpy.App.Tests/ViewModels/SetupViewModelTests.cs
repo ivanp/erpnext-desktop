@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.App.Text;
 using Serpy.App.ViewModels;
 using Serpy.Core.Contracts;
@@ -309,5 +311,37 @@ public sealed class SetupViewModelTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void DownloadParts_MapsSnapshotsToPartViewModelsAndCachedLine()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        var snapshots = new PartDownloadSnapshot[]
+        {
+            new("engine", PartDownloadState.Done, 180_000_000, 180_000_000, 1, true),
+            new("os", PartDownloadState.Done, 341_000_000, 341_000_000, 1, true),
+            new("system-tools", PartDownloadState.Downloading, 100_000_000, 200_000_000, 212, false),
+        };
+
+        var update = new SetupUpdate(
+            Guid.NewGuid(), SetupRunState.Working, NoSteps, SetupStepId.Download, 40, "Downloading system-tools",
+            TimeSpan.FromMinutes(1), false, DownloadParts: snapshots);
+
+        vm.ApplySetupUpdate(update);
+
+        Assert.Equal(3, vm.DownloadParts.Count);
+        var engine = vm.DownloadParts[0];
+        Assert.Equal("Serpy engine", engine.Title);
+        Assert.True(engine.IsDone);
+        Assert.Contains(UiText.AlreadyOnThisPc, engine.StateText);
+
+        var tools = vm.DownloadParts[2];
+        Assert.Equal("System tools", tools.Title);
+        Assert.Equal("212 files", tools.FileCountText);
+        Assert.True(tools.ShowFileCount);
+        Assert.Equal(50, tools.Percent);
+
+        Assert.Equal(UiText.PartsCached(2, 3), vm.CachedPartsLine);
     }
 }

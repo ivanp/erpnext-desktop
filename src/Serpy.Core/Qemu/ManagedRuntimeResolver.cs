@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -22,7 +24,7 @@ namespace Serpy.Core.Qemu;
 /// directly. On a zero exit it validates the returned staging tree
 /// (<c>ValidateContents</c>/<c>-version</c>/TLS) and only then commits.
 /// </summary>
-public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
+public sealed class ManagedRuntimeResolver(RuntimeManifest manifest, DownloadEngine? downloadEngine = null)
 {
     private static readonly string[] RequiredExes =
     [
@@ -62,6 +64,8 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
 
     internal Func<bool, IProgress<string>?, CancellationToken, Task<InstallOutcome>>? InstallHandler { get; set; }
 
+
+    public DownloadEngine? DownloadEngine { get; set; } = downloadEngine;
     /// <summary>
     /// Install the QEMU runtime. This is the <b>only</b> elevating entry point on this
     /// type — call only from the consented setup flow (IU2), never a lifecycle operation.
@@ -183,11 +187,33 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         Directory.CreateDirectory(tempRoot);
         try
         {
-            var installerPath = Path.Combine(tempRoot, "qemu-w64-setup.exe");
-            progress?.Report("Downloading QEMU installer…");
-            await DownloadAsync(url, installerPath, ct);
-            progress?.Report("Verifying installer SHA-256…");
-            VerifySha256Required(installerPath, expectedSha);
+            string installerPath;
+            var installerFileName = Path.GetFileName(new Uri(url).LocalPath);
+            if (string.IsNullOrEmpty(installerFileName)) installerFileName = "qemu-w64-setup.exe";
+
+            if (DownloadEngine is not null)
+            {
+                if (DownloadEngine.Cache.Contains(installerFileName) &&
+                    TryVerifySha256(DownloadEngine.Cache.GetPath(installerFileName), expectedSha))
+                {
+                    installerPath = DownloadEngine.Cache.GetPath(installerFileName);
+                }
+                else
+                {
+                    progress?.Report("Downloading QEMU installer…");
+                    await DownloadEngine.DownloadPartsAsync(["engine"], ct: ct).ConfigureAwait(false);
+                    installerPath = DownloadEngine.Cache.GetPath(installerFileName);
+                    VerifySha256Required(installerPath, expectedSha);
+                }
+            }
+            else
+            {
+                installerPath = Path.Combine(tempRoot, "qemu-w64-setup.exe");
+                progress?.Report("Downloading QEMU installer…");
+                await DownloadAsync(url, installerPath, ct);
+                progress?.Report("Verifying installer SHA-256…");
+                VerifySha256Required(installerPath, expectedSha);
+            }
 
             // The vendor installer is launched only by the separate signed elevated
             // bootstrapper (IR3/IKTD1), never directly by this non-elevated app.
@@ -410,6 +436,19 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest)
         if (!string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(
                 $"SHA-256 mismatch.  Expected: {expectedHex}  Actual: {actual}");
+    }
+
+    private static bool TryVerifySha256(string path, string expectedHex)
+    {
+        if (!File.Exists(path) || string.IsNullOrEmpty(expectedHex)) return false;
+        try
+        {
+            using var sha = SHA256.Create();
+            using var stream = File.OpenRead(path);
+            var actual = Convert.ToHexString(sha.ComputeHash(stream));
+            return string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     private static async Task ProbeHasTlsAsync(

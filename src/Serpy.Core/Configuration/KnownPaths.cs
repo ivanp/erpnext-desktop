@@ -28,6 +28,9 @@ public static class KnownPaths
     /// <summary>Persisted settings and state JSON files.</summary>
     public static string SettingsDir => Path.Combine(AppDataRoot, "settings");
 
+    /// <summary>Download cache: verified build input archives and installers.</summary>
+    public static string CacheDir => Path.Combine(AppDataRoot, "cache");
+
     private static string ResolveAppDataRoot()
     {
         var testOverride = Environment.GetEnvironmentVariable("SERPY_TEST_APPDATA");

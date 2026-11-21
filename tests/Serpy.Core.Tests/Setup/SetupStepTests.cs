@@ -1,3 +1,6 @@
+using Serpy.Core.Downloads;
+using Serpy.Core.Versions;
+
 using System.Diagnostics;
 using System.Text.Json;
 using Serpy.Core.Configuration;
@@ -275,5 +278,48 @@ public sealed class SetupStepTests : IDisposable
     public void AnApplianceThatIsStopped_IsNotDone()
     {
         Assert.False(new StartStep(null!, NewStateStore()).IsDone(Context()));
+    }
+
+    [Fact]
+    public void DownloadStep_IsDone_WhenAllFilesVerifiedInCache()
+    {
+        var cache = new DownloadCache(Path.Combine(_dir, "cache"));
+        var payload = "good-file"u8.ToArray();
+        var file = new InputFile
+        {
+            Key = "sample.deb",
+            Size = payload.Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)),
+            Urls = ["https://deb.debian.org/sample.deb"],
+            InGuest = true
+        };
+        var inputs = new BuildInputs
+        {
+            Parts = [new InputPart { Id = "database", Title = "Database", Files = [file] }]
+        };
+
+        var engine = new DownloadEngine(inputs, cache);
+        var step = new DownloadStep(engine, cache);
+
+        Assert.False(step.IsDone(Context()));
+        Directory.CreateDirectory(cache.CacheDirectory);
+        File.WriteAllBytes(cache.GetPath(file.Key), payload);
+        Assert.True(step.IsDone(Context()));
+    }
+
+    [Fact]
+    public void DownloadStep_DeleteLeftovers_DeletesPartFiles()
+    {
+        var cache = new DownloadCache(Path.Combine(_dir, "cache"));
+        Directory.CreateDirectory(cache.CacheDirectory);
+        var partFile = cache.GetPartPath("test.deb");
+        File.WriteAllText(partFile, "partial");
+
+        var inputs = new BuildInputs();
+        var engine = new DownloadEngine(inputs, cache);
+        var step = new DownloadStep(engine, cache);
+
+        step.DeleteLeftovers(Context());
+        Assert.False(File.Exists(partFile));
     }
 }

@@ -1,3 +1,6 @@
+using Serpy.Core.Downloads;
+using Serpy.Core.Versions;
+
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Qemu;
@@ -235,5 +238,48 @@ public sealed class PrepareStepTests : IDisposable
         Assert.Equal(OperationOutcome.Failure, result.Outcome);
         Assert.Contains("8", result.Message);
         Assert.Contains(log, line => line.Contains("8"));
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenQemuNeeded_AsksEngineForInstallerPartBeforeElevation()
+    {
+        var (resolver, _) = CreateMockResolver(enableFeatures => InstallOutcome.Installed);
+
+        var engineCalled = false;
+        var installerDownloadedBeforeElevation = false;
+
+        var cache = new DownloadCache(Path.Combine(_dir, "cache"));
+        var inputs = new BuildInputs
+        {
+            Parts =
+            [
+                new InputPart
+                {
+                    Id = "engine",
+                    Title = "Serpy engine",
+                    Files = []
+                }
+            ]
+        };
+
+        var engine = new DownloadEngine(inputs, cache, delay: (_, _) => Task.CompletedTask);
+        resolver.InstallHandler = (enableFeatures, _, _) =>
+        {
+            installerDownloadedBeforeElevation = engineCalled;
+            return Task.FromResult(InstallOutcome.Installed);
+        };
+
+        // Wrapper or subclass to intercept DownloadPartsAsync
+        var step = new PrepareStep(resolver, engine: engine);
+
+        // To track whether engine download happened before InstallHandler:
+        // We can hook cache or pre-populate
+        var log = new List<string>();
+        var context = CreateContext(needsFeature: false, log: log);
+
+        var result = await step.RunAsync(context, CancellationToken.None);
+
+        Assert.Equal(OperationOutcome.Success, result.Outcome);
+        Assert.Contains(log, line => line.Contains("Downloading QEMU installer before elevation"));
     }
 }

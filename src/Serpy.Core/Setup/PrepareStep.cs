@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Qemu;
@@ -16,7 +18,8 @@ namespace Serpy.Core.Setup;
 public sealed class PrepareStep(
     ManagedRuntimeResolver resolver,
     SetupStateStore? setupStore = null,
-    Func<Task<bool>>? whpxProbe = null) : ISetupStep
+    Func<Task<bool>>? whpxProbe = null,
+    DownloadEngine? engine = null) : ISetupStep
 {
     public SetupStepId Id => SetupStepId.Prepare;
 
@@ -73,6 +76,13 @@ public sealed class PrepareStep(
         {
             context.Log("QEMU is already installed and Windows features are active; skipping elevation.");
             return SetupStepResult.Success("QEMU runtime and Windows features are ready.");
+        }
+
+        if (needQemu && engine is not null)
+        {
+            context.Activity("Downloading QEMU installer");
+            context.Log("Downloading QEMU installer before elevation.");
+            await engine.DownloadPartsAsync(["engine"], ct: ct).ConfigureAwait(false);
         }
 
         context.Activity("Setting up QEMU runtime and Windows features");

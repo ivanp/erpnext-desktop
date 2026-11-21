@@ -77,6 +77,9 @@ public sealed class SetupContext
     /// <summary>True when the PC check found that Prepare must turn the Windows feature on. U7 reads it.</summary>
     public bool NeedsFeature { get; set; }
 
+    /// <summary>Download part snapshots updated by DownloadStep.</summary>
+    public Action<IReadOnlyList<Serpy.Core.Downloads.PartDownloadSnapshot>>? DownloadPartsUpdated { get; set; }
+
     /// <summary>Adapts an operation's progress stream to this context, with no thread hop.</summary>
     public IProgress<OperationUpdate> AsProgress() => new InlineProgress(this);
 

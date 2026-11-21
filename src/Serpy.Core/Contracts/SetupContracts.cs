@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 namespace Serpy.Core.Contracts;
 
 /// <summary>The steps of one setup run, in the order they run (KTD7).</summary>
@@ -57,7 +59,8 @@ public sealed record SetupUpdate(
     TimeSpan StepElapsed,
     bool Stuck,
     FailureCode Failure = FailureCode.None,
-    string? FailureMessage = null);
+    string? FailureMessage = null,
+    IReadOnlyList<PartDownloadSnapshot>? DownloadParts = null);
 
 /// <summary>Terminal result of one setup run.</summary>
 public sealed record SetupResult(

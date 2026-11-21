@@ -10,7 +10,7 @@ namespace Serpy.Core.Operations;
 /// Sequence:
 ///   1. If a QEMU VM is running, call StopOperation (or force terminate).
 ///   2. Delete appliance instance disks: system.qcow2, data.img, and intermediate markers.
-///   3. Explicitly PRESERVE base image (debian-base-*.qcow2) and runtime binaries.
+///   3. Explicitly PRESERVE base image (debian-base-*.qcow2), download cache, and runtime binaries.
 ///   4. Clear stored health credentials (DPAPI).
 ///   5. Reset StateStore to NotBuilt / Stopped.
 ///   6. Delete setup-state.json.

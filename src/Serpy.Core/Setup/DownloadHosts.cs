@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.Core.Images;
 using Serpy.Core.Versions;
 
@@ -32,6 +34,76 @@ public static class DownloadHosts
 
         sites.AddRange(BuildSites.Select(host => new Uri($"https://{host}/")));
         return sites.DistinctBy(u => u.Host, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Every site the pinned input list needs, whether or not a part of it is already on this PC.</summary>
+    public static IReadOnlyList<Uri> For(BuildInputs inputs)
+    {
+        var sites = new List<Uri>();
+        if (inputs.Parts is null) return sites;
+
+        foreach (var part in inputs.Parts)
+        {
+            if (part.Files is null) continue;
+            foreach (var file in part.Files)
+            {
+                if (file.Urls is null) continue;
+                foreach (var url in file.Urls)
+                {
+                    if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                    {
+                        sites.Add(new Uri($"https://{uri.Host}/"));
+                    }
+                }
+            }
+        }
+
+        var hasPlaceholderParts = inputs.Parts.Any(p => p.Files.Count == 0 &&
+            !string.Equals(p.Id, "engine", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(p.Id, "os", StringComparison.OrdinalIgnoreCase));
+
+        if (hasPlaceholderParts)
+        {
+            foreach (var site in BuildSites)
+            {
+                sites.Add(new Uri($"https://{site}/"));
+            }
+        }
+
+        return sites.DistinctBy(u => u.Host, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// The sites to ask for this run from the pinned input list.
+    /// Returns empty when an accepted system image exists or when every file is already cached.
+    /// </summary>
+    public static IReadOnlyList<Uri> StillNeeded(BuildInputs inputs, string applianceDirectory, DownloadCache? cache = null)
+    {
+        var image = Path.Combine(applianceDirectory, "system.qcow2");
+        var accepted = File.Exists(image) && File.Exists(Path.Combine(applianceDirectory, SystemImageManifest.FileName));
+        if (accepted) return [];
+
+        if (cache is not null && inputs.Parts is not null)
+        {
+            var allCached = true;
+            foreach (var part in inputs.Parts)
+            {
+                if (part.Files is null) continue;
+                foreach (var file in part.Files)
+                {
+                    if (!cache.TryVerify(file))
+                    {
+                        allCached = false;
+                        break;
+                    }
+                }
+                if (!allCached) break;
+            }
+
+            if (allCached) return [];
+        }
+
+        return For(inputs);
     }
 
     /// <summary>

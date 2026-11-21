@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
@@ -55,8 +57,17 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _lock      = new LifecycleLock();
         var setupStore = new SetupStateStore();
         _statusOp  = new StatusOperation(stateStore, setupStore, () => _setupOp?.IsWorking ?? false);
+        BuildInputs buildInputs;
+        try { buildInputs = BuildInputsLoader.Load(); }
+        catch { buildInputs = new BuildInputs(); }
+        var downloadCache = new DownloadCache();
+        var downloadEngine = new DownloadEngine(buildInputs, downloadCache);
+        if (runtimeResolver is { } rr)
+        {
+            rr.DownloadEngine ??= downloadEngine;
+        }
         _buildOp   = new BuildOperation(
-            imageDownloader, new PackageClosurePreflight(manifest), seedWriter, imageTool,
+            imageDownloader, seedWriter, imageTool,
             runtimeResolver, certStore, stateStore, manifest, settings);
         _initOp    = new InitializeOperation(
             imageTool, runtimeResolver, certStore,
@@ -85,11 +96,13 @@ public sealed class ApplianceService : IApplianceService, IDisposable
             steps.Add(new PcCheckStep(
                 pcProbe,
                 () => KnownPaths.ApplianceDir,
-                () => DownloadHosts.StillNeeded(manifest, KnownPaths.ApplianceDir),
+                () => DownloadHosts.StillNeeded(buildInputs, KnownPaths.ApplianceDir, downloadCache),
                 extraDiskBytes: () => CompanyDataStep.GetExtraDiskBytes(
                     KnownPaths.ApplianceDir, setupStore, stateStore)));
-            steps.Add(new PrepareStep(runtimeResolver, setupStore));
+            steps.Add(new PrepareStep(runtimeResolver, setupStore, engine: downloadEngine));
         }
+
+        steps.Add(new DownloadStep(downloadEngine, downloadCache));
 
         steps.Add(new BuildStep(_buildOp, stateStore, setupStore));
         steps.Add(new CompanyDataStep(

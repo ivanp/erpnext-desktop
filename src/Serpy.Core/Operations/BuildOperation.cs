@@ -30,7 +30,6 @@ namespace Serpy.Core.Operations;
 /// </summary>
 public sealed class BuildOperation(
     BaseImageDownloader imageDownloader,
-    PackageClosurePreflight packageClosurePreflight,
     NoCloudSeedWriter seedWriter,
     QemuImageTool imageTool,
     ManagedRuntimeResolver runtimeResolver,
@@ -80,10 +79,6 @@ public sealed class BuildOperation(
 
         try
         {
-            // 1. Resolve locked guest inputs before downloading or provisioning.
-            Report("preflight", "Verifying locked guest package closure…", 1);
-            await packageClosurePreflight.ValidateAsync(ct);
-
             // 2. Base image
             Report("download", "Downloading Debian base image…", 5);
             await imageDownloader.EnsureAsync(

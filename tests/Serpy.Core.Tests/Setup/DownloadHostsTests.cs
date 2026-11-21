@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.Core.Images;
 using Serpy.Core.Setup;
 using Serpy.Core.Versions;
@@ -63,5 +65,55 @@ public sealed class DownloadHostsTests : IDisposable
     public void AnEmptyFolder_NeedsEverySite()
     {
         Assert.Equal(DownloadHosts.For(Manifest()).Count, DownloadHosts.StillNeeded(Manifest(), _dir).Count);
+    }
+
+    [Fact]
+    public void BuildInputs_DerivesUniqueHttpsHosts()
+    {
+        var inputs = new BuildInputs
+        {
+            Parts =
+            [
+                new InputPart
+                {
+                    Id = "part1",
+                    Title = "Part 1",
+                    Files =
+                    [
+                        new InputFile { Key = "f1", Urls = ["https://pypi.org/f1.whl", "https://snapshot.debian.org/f1.deb"] },
+                        new InputFile { Key = "f2", Urls = ["https://pypi.org/f2.whl", "http://insecure.example/f2.deb"] }
+                    ]
+                }
+            ]
+        };
+
+        var hosts = DownloadHosts.For(inputs).Select(u => u.Host).ToList();
+        Assert.Contains("pypi.org", hosts);
+        Assert.Contains("snapshot.debian.org", hosts);
+        Assert.DoesNotContain("insecure.example", hosts);
+        Assert.Equal(2, hosts.Count);
+    }
+
+    [Fact]
+    public void BuildInputs_WhenAllFilesCached_StillNeededReturnsEmpty()
+    {
+        var cache = new DownloadCache(_dir);
+        var payload = "cached content"u8.ToArray();
+        var file = new InputFile
+        {
+            Key = "cached.deb",
+            Size = payload.Length,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)),
+            Urls = ["https://deb.debian.org/cached.deb"]
+        };
+        File.WriteAllBytes(cache.GetPath(file.Key), payload);
+
+        var inputs = new BuildInputs
+        {
+            Parts = [new InputPart { Id = "part", Title = "Part", Files = [file] }]
+        };
+
+        var stillNeeded = DownloadHosts.StillNeeded(inputs, _dir, cache);
+        Assert.Empty(stillNeeded);
     }
 }

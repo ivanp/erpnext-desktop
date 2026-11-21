@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
@@ -46,6 +48,7 @@ public sealed class SetupOperation
     private bool _restartRequested;
     private List<string> _lastLogPaths = [];
     private string? _lastPcCheckReport;
+    private IReadOnlyList<PartDownloadSnapshot>? _downloadParts;
 
     public SetupOperation(
         IReadOnlyList<ISetupStep> steps,
@@ -134,6 +137,14 @@ public sealed class SetupOperation
                 Activity = NoteActivity,
                 StepPercent = percent => NoteStepPercent(percent),
                 Log = line => log.Info(line),
+                DownloadPartsUpdated = parts =>
+                {
+                    lock (_gate)
+                    {
+                        _downloadParts = parts;
+                        EmitLocked(SetupRunState.Working, force: false);
+                    }
+                },
             };
 
             Emit(SetupRunState.Working, force: true);
@@ -429,7 +440,7 @@ public sealed class SetupOperation
         _progress?.Report(new SetupUpdate(
             _runId, run, steps, _current, percent, _activity,
             _current is null ? TimeSpan.Zero : now - _stepStarted,
-            _stuck, failure, message));
+            _stuck, failure, message, _downloadParts));
     }
 
     private SetupResult Result(

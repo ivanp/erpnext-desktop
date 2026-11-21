@@ -119,4 +119,27 @@ public sealed class ResetOperationTests : IDisposable
         // Cleanup the test base image
         try { File.Delete(baseImage); } catch { /* ignore */ }
     }
+
+    [Fact]
+    public async Task ResetAsync_PreservesDownloadCacheFolderAndFiles()
+    {
+        var stateStore = new StateStore(Path.Combine(_settingsDir, "state.json"));
+        var setupStore = new SetupStateStore(Path.Combine(_settingsDir, "setup-state.json"));
+        var creds = new HealthCredentials(Path.Combine(_settingsDir, ".health-cred"));
+        var certStore = new TlsCertificateStore(Path.Combine(_settingsDir, "certs"));
+        var stopOp = new StopOperation(stateStore, certStore);
+
+        // Pre-populate download cache
+        Directory.CreateDirectory(KnownPaths.CacheDir);
+        var cachedFile = Path.Combine(KnownPaths.CacheDir, "cached-package.deb");
+        await File.WriteAllTextAsync(cachedFile, "deb-content");
+
+        var resetOp = new ResetOperation(stopOp, creds, stateStore, setupStore);
+        var result = await resetOp.ExecuteAsync(Guid.NewGuid(), new Progress<OperationUpdate>(), CancellationToken.None);
+
+        Assert.Equal(OperationOutcome.Success, result.Outcome);
+        Assert.True(Directory.Exists(KnownPaths.CacheDir));
+        Assert.True(File.Exists(cachedFile));
+        Assert.Equal("deb-content", await File.ReadAllTextAsync(cachedFile));
+    }
 }

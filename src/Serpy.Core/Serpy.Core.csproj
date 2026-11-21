@@ -7,6 +7,11 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\config\build-inputs.json" Link="config\build-inputs.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!--
     Descriptor trust anchor (IR3/IR7): the QEMU runtime descriptor's trusted
     public key is a build input, never a source literal.

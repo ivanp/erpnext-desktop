@@ -1,3 +1,5 @@
+using Serpy.Core.Downloads;
+
 using System.Collections.ObjectModel;
 using System.Text;
 using Avalonia.Threading;
@@ -194,6 +196,8 @@ public partial class SetupViewModel : ObservableObject
     [ObservableProperty]
     private string _cachedPartsLine = string.Empty;
 
+    public ObservableCollection<DownloadPartItem> DownloadParts { get; } = [];
+
     public string ReadyUsername => UiText.DefaultUsername;
 
     public string ReadyPassword => UiText.DefaultPassword;
@@ -296,6 +300,7 @@ public partial class SetupViewModel : ObservableObject
         ApplySteps(update.Steps, update.CurrentStep);
         ApplyRunState(update);
         StartDetailsTail(update.RunId);
+        ApplyDownloadParts(update.DownloadParts);
     }
 
     /// <summary>Applies an appliance status poll (presentation mapping only).</summary>
@@ -364,6 +369,68 @@ public partial class SetupViewModel : ObservableObject
                 item.State = SetupStripState.Pending;
             }
         }
+    }
+
+    private void ApplyDownloadParts(IReadOnlyList<PartDownloadSnapshot>? parts)
+    {
+        if (parts is null || parts.Count == 0) return;
+
+        var cachedCount = 0;
+        foreach (var snap in parts)
+        {
+            if (snap.AlreadyPresent || snap.State == PartDownloadState.Done)
+                cachedCount++;
+
+            var existing = DownloadParts.FirstOrDefault(p => string.Equals(p.Id, snap.PartId, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                existing = new DownloadPartItem { Id = snap.PartId, Title = GetPartTitle(snap.PartId) };
+                DownloadParts.Add(existing);
+            }
+
+            existing.Percent = snap.Total > 0 ? Math.Clamp((int)(snap.Bytes * 100 / snap.Total), 0, 100) : 0;
+            existing.IsDone = snap.State == PartDownloadState.Done;
+            existing.IsIndeterminate = snap.State == PartDownloadState.Checking;
+            existing.FileCountText = snap.FileCount > 1 ? $"{snap.FileCount} files" : string.Empty;
+            existing.ShowFileCount = snap.FileCount > 1;
+
+            existing.StateText = snap.State switch
+            {
+                PartDownloadState.Done when snap.AlreadyPresent => "✓ " + UiText.AlreadyOnThisPc,
+                PartDownloadState.Done => "✓ " + UiText.PartDone + $" · {FormatBytes(snap.Total)}",
+                PartDownloadState.Checking => UiText.PartChecking,
+                PartDownloadState.Waiting => UiText.PartWaiting,
+                PartDownloadState.Downloading => $"{FormatBytes(snap.Bytes)} of {FormatBytes(snap.Total)}",
+                PartDownloadState.Failed => "Failed",
+                _ => string.Empty
+            };
+        }
+
+        CachedPartsLine = UiText.PartsCached(cachedCount, parts.Count);
+    }
+
+    private static string GetPartTitle(string id) => id.ToLowerInvariant() switch
+    {
+        "engine" => "Serpy engine",
+        "os" => "Operating system for ERPNext",
+        "database" => "Database",
+        "system-tools" => "System tools",
+        "language-tools" => "Language tools",
+        "web-tools" => "Web tools",
+        "framework" => "ERPNext framework",
+        "erpnext" => "ERPNext",
+        _ => id
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024)
+            return $"{bytes / (1024.0 * 1024 * 1024):0.#} GB";
+        if (bytes >= 1024L * 1024)
+            return $"{bytes / (1024.0 * 1024):0} MB";
+        if (bytes >= 1024L)
+            return $"{bytes / 1024.0:0} KB";
+        return $"{bytes} B";
     }
 
     private void ApplyRunState(SetupUpdate update)
@@ -666,4 +733,16 @@ public partial class SetupViewModel : ObservableObject
         _detailsBuffer.Clear();
         DetailLogText = string.Empty;
     }
+}
+
+public sealed partial class DownloadPartItem : ObservableObject
+{
+    [ObservableProperty] private string _id = string.Empty;
+    [ObservableProperty] private string _title = string.Empty;
+    [ObservableProperty] private string _stateText = string.Empty;
+    [ObservableProperty] private string _fileCountText = string.Empty;
+    [ObservableProperty] private int _percent;
+    [ObservableProperty] private bool _isIndeterminate;
+    [ObservableProperty] private bool _isDone;
+    [ObservableProperty] private bool _showFileCount;
 }

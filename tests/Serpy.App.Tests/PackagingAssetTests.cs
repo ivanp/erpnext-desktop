@@ -8,6 +8,7 @@ public sealed class PackagingAssetTests
         var root = AppContext.BaseDirectory;
 
         Assert.True(File.Exists(Path.Combine(root, "config", "versions.yaml")));
+        Assert.True(File.Exists(Path.Combine(root, "config", "build-inputs.json")));
         Assert.True(File.Exists(Path.Combine(root, "cloud-init", "user-data")));
         Assert.True(File.Exists(Path.Combine(root, "cloud-init", "meta-data")));
         Assert.True(File.Exists(Path.Combine(root, "guest", "init-data.sh")));

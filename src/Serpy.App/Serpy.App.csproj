@@ -29,6 +29,8 @@
   <ItemGroup>
     <Content Include="..\..\config\versions.yaml" Link="config\versions.yaml"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\config\build-inputs.json" Link="config\build-inputs.json"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\build\cloud-init\user-data" Link="cloud-init\user-data"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\build\cloud-init\meta-data" Link="cloud-init\meta-data"

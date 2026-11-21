@@ -15,6 +15,7 @@ $publish = (Resolve-Path -LiteralPath $PublishDirectory).Path
 $required = @(
     'Serpy.App.exe',
     'config\versions.yaml',
+    'config\build-inputs.json',
     'cloud-init\user-data',
     'cloud-init\meta-data',
     'guest\init-data.sh',
