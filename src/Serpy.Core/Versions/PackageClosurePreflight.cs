@@ -17,6 +17,7 @@ public sealed class PackageClosurePreflight(VersionManifest manifest, HttpMessag
     private const string NodeBase = "https://nodejs.org/dist";
     private const string GitHubApi = "https://api.github.com/repos";
     private const string PyPi = "https://pypi.org/pypi";
+    private const string Npm = "https://registry.npmjs.org";
     private const string NodeLinuxX64Sha256 = "91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5";
 
     public async Task ValidateAsync(CancellationToken ct = default)
@@ -47,6 +48,8 @@ public sealed class PackageClosurePreflight(VersionManifest manifest, HttpMessag
             await AssertGitCommitAsync(http, "frappe/frappe", manifest.Apps.Frappe.Branch, manifest.Apps.Frappe.Commit, ct);
             await AssertGitCommitAsync(http, "frappe/erpnext", manifest.Apps.ErpNext.Branch, manifest.Apps.ErpNext.Commit, ct);
             await AssertPyPiVersionAsync(http, "frappe-bench", "5.31.0", ct);
+            await AssertPyPiVersionAsync(http, "uv", "0.11.33", ct);
+            await AssertNpmVersionAsync(http, "yarn", "1.22.22", ct);
         }
         catch (PackageClosureException)
         {
@@ -104,6 +107,14 @@ public sealed class PackageClosurePreflight(VersionManifest manifest, HttpMessag
         var resolved = doc.RootElement.GetProperty("info").GetProperty("version").GetString();
         if (!string.Equals(resolved, version, StringComparison.Ordinal))
             throw new InvalidOperationException($"PyPI resolved {package}={resolved}; expected {version}.");
+    }
+
+    private static async Task AssertNpmVersionAsync(HttpClient http, string package, string version, CancellationToken ct)
+    {
+        using var doc = JsonDocument.Parse(await GetTextAsync(http, $"{Npm}/{package}/{version}", ct));
+        var resolved = doc.RootElement.GetProperty("version").GetString();
+        if (!string.Equals(resolved, version, StringComparison.Ordinal))
+            throw new InvalidOperationException($"npm resolved {package}={resolved}; expected {version}.");
     }
 
     private static async Task AssertSuccessAsync(HttpClient http, string url, CancellationToken ct)

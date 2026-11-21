@@ -63,7 +63,8 @@ main() {
   # Debian disables ensurepip and pip for the system Python, so the bench command lives in its
   # own virtual environment and is linked onto the PATH for every user.
   python3.14 -m venv /opt/serpy-tools
-  /opt/serpy-tools/bin/pip install --no-cache-dir frappe-bench==5.31.0
+  # uv is pinned beside bench: bench 5.31.0 accepts any 0.11.x and would otherwise take the newest.
+  /opt/serpy-tools/bin/pip install --no-cache-dir frappe-bench==5.31.0 uv==0.11.33
   # bench runs uv to create the bench environment, and it finds uv on the PATH of the frappe user.
   ln -sf /opt/serpy-tools/bin/bench /usr/local/bin/bench
   ln -sf /opt/serpy-tools/bin/uv /usr/local/bin/uv
@@ -72,6 +73,10 @@ main() {
   echo '91a0794f4dbc94bc4a9296139ed9101de21234982bae2b325e37ebd3462273e5  /tmp/node.tar.xz' | sha256sum -c -
   tar -C /usr/local --strip-components=1 -xJf /tmp/node.tar.xz
   rm -f /tmp/node.tar.xz
+  # bench init and bench build run yarn for every app and stop when it is missing. Node's archive
+  # does not carry it, so it is installed from the npm registry at an exact version.
+  npm install -g yarn@1.22.22
+  yarn --version
 
   stage erpnext-source
   useradd -m -s /bin/bash frappe

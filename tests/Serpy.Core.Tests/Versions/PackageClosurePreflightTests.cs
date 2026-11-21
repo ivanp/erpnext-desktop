@@ -27,6 +27,8 @@ public sealed class PackageClosurePreflightTests
             ["git/ref/tags/v16.31.0"] = "{\"object\":{\"type\":\"commit\",\"sha\":\"6a329d068416768ec47ccd3326b9cc95a8d7bf99\"}}",
             ["git/ref/tags/v16.32.3"] = "{\"object\":{\"type\":\"commit\",\"sha\":\"11e0ba0a1c45f217e2e73e885f699102d06da325\"}}",
             ["pypi/frappe-bench/5.31.0/json"] = "{\"info\":{\"version\":\"5.31.0\"}}",
+            ["pypi/uv/0.11.33/json"] = "{\"info\":{\"version\":\"0.11.33\"}}",
+            ["npmjs.org/yarn/1.22.22"] = "{\"version\":\"1.22.22\"}",
         });
 
         var preflight = new PackageClosurePreflight(manifest, handler);
@@ -80,6 +82,19 @@ public sealed class PackageClosurePreflightTests
         Assert.Contains(handler.Requests, uri => uri.EndsWith("git/tags/tag-object", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task ValidateAsync_UnpublishedYarnPin_ReportsHostResolutionFailure()
+    {
+        var responses = Responses();
+        responses["npmjs.org/yarn/1.22.22"] = "{\"version\":\"1.22.23\"}";
+        using var handler = new FixtureHandler(responses);
+
+        var ex = await Assert.ThrowsAsync<PackageClosureException>(
+            () => new PackageClosurePreflight(Manifest(), handler).ValidateAsync());
+
+        Assert.Contains("yarn", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static VersionManifest Manifest() => new()
     {
         Runtime = new VersionManifest.RuntimeSection
@@ -107,6 +122,8 @@ public sealed class PackageClosurePreflightTests
         ["git/ref/tags/v16.32.3"] = $"{{\"object\":{{\"type\":\"commit\",\"sha\":\"{Manifest().Apps.ErpNext.Commit}\"}}}}",
         ["git/tags/tag-object"] = frappeTag ?? "{}",
         ["pypi/frappe-bench/5.31.0/json"] = "{\"info\":{\"version\":\"5.31.0\"}}",
+        ["pypi/uv/0.11.33/json"] = "{\"info\":{\"version\":\"0.11.33\"}}",
+        ["npmjs.org/yarn/1.22.22"] = "{\"version\":\"1.22.22\"}",
     };
 
     private static string AptPackages(params (string Name, string Version)[] packages) => string.Join("\n\n", packages.Select(p => $"Package: {p.Name}\nVersion: {p.Version}"));
