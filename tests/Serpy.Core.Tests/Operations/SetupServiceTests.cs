@@ -5,6 +5,7 @@ using Serpy.Core.Coordination;
 using Serpy.Core.Images;
 using Serpy.Core.Operations;
 using Serpy.Core.Setup;
+using Serpy.Core.Versions;
 
 namespace Serpy.Core.Tests.Operations;
 
@@ -49,6 +50,81 @@ public sealed class SetupServiceTests : IDisposable
         }
 
         public void DeleteLeftovers(SetupContext context) { }
+    }
+
+    private sealed class FakeProbe(PcFacts facts) : IPcProbe
+    {
+        public int Reads;
+        public IReadOnlyList<Uri> LastHosts = [];
+
+        public Task<PcFacts> ReadAsync(string dataDirectory, IReadOnlyList<Uri> hostsToReach, CancellationToken ct)
+        {
+            Reads++;
+            LastHosts = hostsToReach;
+            return Task.FromResult(facts);
+        }
+    }
+
+    private const long Gb = 1024L * 1024 * 1024;
+
+    private static PcFacts Pc(long free) =>
+        new(26200, 32 * Gb, free, @"C:\", true, true, false, InternetFacts.NotNeeded);
+
+    private ApplianceService ServiceWith(IPcProbe? probe) =>
+        new(null!, null!, null!, null!, null!, null!,
+            new StateStore(Path.Combine(_dir, "state.json")), new VersionManifest(), null!,
+            pcProbe: probe);
+
+    [Fact]
+    public async Task APcThatCannotRun_EndsTheRunInThePcCheck_BeforeBuildIsAsked()
+    {
+        var probe = new FakeProbe(Pc(free: 5 * Gb));
+        var service = ServiceWith(probe);
+
+        // Build, company data and start are real steps over null operations: reaching any of them
+        // would throw, so a clean failure in the PC check proves nothing after it ran.
+        var result = await service.RunSetupAsync(new SetupRequest(), new Collector());
+
+        Assert.Equal(OperationOutcome.Failure, result.Outcome);
+        Assert.Equal(FailureCode.DiskFull, result.Code);
+        Assert.Equal(SetupStepId.PcCheck, result.FailedStep);
+        Assert.Equal(1, probe.Reads);
+    }
+
+    [Fact]
+    public async Task ThePcCheck_AsksTheDownloadSites_WhileNoSystemImageIsAccepted()
+    {
+        var probe = new FakeProbe(Pc(free: 5 * Gb));
+
+        await ServiceWith(probe).RunSetupAsync(new SetupRequest(), new Collector());
+
+        Assert.Contains(probe.LastHosts, u => u.Host == "snapshot.debian.org");
+    }
+
+    [Fact]
+    public async Task WithAnAcceptedSystemImage_ThePcCheckAsksNoSite()
+    {
+        File.WriteAllText(Path.Combine(KnownPaths.ApplianceDir, "system.qcow2"), "image");
+        File.WriteAllText(Path.Combine(KnownPaths.ApplianceDir, SystemImageManifest.FileName), "{}");
+        var probe = new FakeProbe(Pc(free: 5 * Gb));
+
+        await ServiceWith(probe).RunSetupAsync(new SetupRequest(), new Collector());
+
+        Assert.Empty(probe.LastHosts);
+    }
+
+    [Fact]
+    public async Task TheSetupStatus_ShowsTheFindingOfTheLastRun_AfterAPcCheckFailure()
+    {
+        var service = ServiceWith(new FakeProbe(Pc(free: 5 * Gb)));
+
+        await service.RunSetupAsync(new SetupRequest(), new Collector());
+        var status = await service.GetStatusAsync();
+
+        Assert.NotNull(status.Setup);
+        Assert.False(status.Setup.Finished);
+        Assert.False(status.Setup.Working);
+        Assert.Equal(FailureCode.DiskFull, status.Setup.LastFailure);
     }
 
     [Fact]

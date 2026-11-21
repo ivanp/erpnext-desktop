@@ -40,7 +40,8 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         StateStore stateStore,
         VersionManifest manifest,
         ApplianceSettings settings,
-        IPowerRequest? powerRequest = null)
+        IPowerRequest? powerRequest = null,
+        IPcProbe? pcProbe = null)
     {
         _stateStore = stateStore;
         _lock      = new LifecycleLock();
@@ -65,12 +66,22 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _resetOp   = new ResetOperation(
             _stopOp, healthCredentials, stateStore, setupStore);
         AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
+        // The PC check comes first and runs again on every run. Only Windows has a probe today;
+        // the other platforms are compile-only targets, so without a probe the run has no PC check.
+        List<ISetupStep> steps = [];
+        if (pcProbe is not null)
+        {
+            steps.Add(new PcCheckStep(
+                pcProbe,
+                () => KnownPaths.ApplianceDir,
+                () => DownloadHosts.StillNeeded(manifest, KnownPaths.ApplianceDir)));
+        }
+
+        steps.Add(new BuildStep(_buildOp, stateStore));
+        steps.Add(new CompanyDataStep(_initOp, stateStore));
+        steps.Add(new StartStep(_startOp, stateStore));
         _setupOp   = new SetupOperation(
-            [
-                new BuildStep(_buildOp, stateStore),
-                new CompanyDataStep(_initOp, stateStore),
-                new StartStep(_startOp, stateStore),
-            ],
+            steps,
             setupStore, stateStore, powerRequest ?? NoPowerRequest.Instance,
             () => AdoptOperation.ReconcileJournal(stateStore, healthCredentials),
             manifest: manifest);

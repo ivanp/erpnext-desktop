@@ -8,6 +8,7 @@ using Serpy.Core.Coordination;
 using Serpy.Core.Health;
 using Serpy.Core.Images;
 using Serpy.Core.Operations;
+using Serpy.Core.Platform.Windows;
 using Serpy.Core.Qemu;
 using Serpy.Core.Versions;
 
@@ -73,7 +74,8 @@ using (singleInstanceMutex)
     var stateStore    = new StateStore();
     var service = new ApplianceService(
         resolver, certStore, imageTool, imageDl, seedWriter,
-        healthCreds, stateStore, manifest, settings);
+        healthCreds, stateStore, manifest, settings,
+        pcProbe: OperatingSystem.IsWindows() ? new WindowsPcProbe() : null);
 
     if (isUnattended)
     {

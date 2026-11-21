@@ -191,10 +191,18 @@ public sealed class ApplianceServiceContractTests : IDisposable
 [Collection("LifecycleLock")]
 public sealed class ApplianceServicePreconditionTests : IDisposable
 {
+    // The service takes the lifecycle lease from the app-data folder. Against the real folder these
+    // tests fail whenever Serpy or a setup run holds the lease, so they use a temporary root.
+    private const string OverrideVariable = "SERPY_TEST_APPDATA";
+    private readonly string? _previousOverride = Environment.GetEnvironmentVariable(OverrideVariable);
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"SerpyServicePrecondition-{Guid.NewGuid():N}");
+
+    public ApplianceServicePreconditionTests() =>
+        Environment.SetEnvironmentVariable(OverrideVariable, Path.Combine(_dir, "appdata"));
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable(OverrideVariable, _previousOverride);
         if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true);
     }
 
