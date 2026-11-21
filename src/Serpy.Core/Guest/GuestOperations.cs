@@ -128,15 +128,36 @@ public sealed class GuestOperations(QgaClient qga) : IGuestHealthProbe
                 $"cd /home/frappe/frappe-bench && bench --site {siteName} list-apps"],
             ct);
 
-    /// <summary>Check scheduler is running.</summary>
+    /// <summary>
+    /// Check the scheduler is on. <c>bench scheduler status</c> of the pinned Frappe prints
+    /// "Scheduler is enabled for site X" or "Scheduler is disabled for site X", and disabled also
+    /// covers a paused scheduler and maintenance mode, so the word is the answer.
+    /// </summary>
     public async Task<bool> IsSchedulerRunningAsync(string siteName, CancellationToken ct = default)
     {
         var r = await qga.ExecAsync(
             "su", ["-", "frappe", "-c",
                 $"cd /home/frappe/frappe-bench && bench --site {siteName} scheduler status"],
             ct: ct);
-        return r.Succeeded &&
-               r.Stdout.Contains("active", StringComparison.OrdinalIgnoreCase);
+        return r.Succeeded && IsSchedulerEnabled(r.Stdout);
+    }
+
+    /// <summary>
+    /// Reads the status word of the line "Scheduler is {status} for site {site}". Other lines, such as
+    /// bench's notice that a newer version exists, are ignored, and no line at all is not enabled.
+    /// </summary>
+    internal static bool IsSchedulerEnabled(string statusOutput)
+    {
+        const string prefix = "Scheduler is ";
+        foreach (var line in statusOutput.Split('\n'))
+        {
+            var text = line.Trim();
+            if (!text.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var word = text[prefix.Length..].Split(' ', 2)[0];
+            return word.Equals("enabled", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
