@@ -20,7 +20,8 @@ public sealed class ProvisionMonitor(
     TimeSpan quietTime,
     TimeSpan totalTimeout,
     Func<DateTimeOffset>? clock = null,
-    TimeSpan? pollInterval = null)
+    TimeSpan? pollInterval = null,
+    TimeSpan? exitGrace = null)
 {
     public const string StartedMarker = "SERPY_PROVISION_STARTED";
     public const string StageMarker = "SERPY_STAGE";
@@ -29,6 +30,9 @@ public sealed class ProvisionMonitor(
 
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly TimeSpan _poll = pollInterval ?? TimeSpan.FromMilliseconds(250);
+
+    // After QEMU exits, the last console lines can still be in flight. Wait this long for them.
+    private readonly TimeSpan _exitGrace = exitGrace ?? TimeSpan.FromSeconds(2);
 
     /// <summary>Raised for each stage marker, with the stage id.</summary>
     public event Action<string>? StageChanged;
@@ -61,6 +65,23 @@ public sealed class ProvisionMonitor(
         var e = lines.GetAsyncEnumerator(readCts.Token);
         var next = e.MoveNextAsync().AsTask();
 
+        // Takes one console line and returns the outcome when that line ends the provisioning.
+        ProvisionOutcome? Interpret(string line)
+        {
+            lastActivity = _clock();
+            stuckRaised = false;
+            LineReceived?.Invoke(line);
+
+            if (line.Contains(StartedMarker, StringComparison.Ordinal)) started = true;
+            else if (TryStage(line, out var parsedStage)) { stage = parsedStage; StageChanged?.Invoke(parsedStage); }
+            else if (line.Contains(DoneMarker, StringComparison.Ordinal))
+                return new ProvisionOutcome(true, FailureCode.None, "Provisioning finished.", stage);
+            else if (TryFailed(line, out var failedStage, out var code))
+                return new ProvisionOutcome(false, FailureCode.ProvisioningFailed,
+                    $"Provisioning failed in stage '{failedStage}' with exit code {code}.", failedStage, code);
+            return null;
+        }
+
         try
         {
             while (true)
@@ -85,18 +106,8 @@ public sealed class ProvisionMonitor(
                         return new ProvisionOutcome(false, FailureCode.GuestConsoleClosed,
                             "The guest console closed before provisioning finished.", stage);
 
-                    var line = e.Current;
-                    lastActivity = _clock();
-                    stuckRaised = false;
-                    LineReceived?.Invoke(line);
-
-                    if (line.Contains(StartedMarker, StringComparison.Ordinal)) started = true;
-                    else if (TryStage(line, out var s)) { stage = s; StageChanged?.Invoke(s); }
-                    else if (line.Contains(DoneMarker, StringComparison.Ordinal))
-                        return new ProvisionOutcome(true, FailureCode.None, "Provisioning finished.", stage);
-                    else if (TryFailed(line, out var failedStage, out var code))
-                        return new ProvisionOutcome(false, FailureCode.ProvisioningFailed,
-                            $"Provisioning failed in stage '{failedStage}' with exit code {code}.", failedStage, code);
+                    var outcome = Interpret(e.Current);
+                    if (outcome is not null) return outcome;
 
                     next = e.MoveNextAsync().AsTask();
                     continue;
@@ -105,6 +116,37 @@ public sealed class ProvisionMonitor(
                 if (done == processExited)
                 {
                     var exit = await processExited;
+
+                    // A failed marker that was printed just before the exit may not have been read yet.
+                    // Give the console a short time to deliver it, so the stage and code are not lost.
+                    using var graceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var grace = Task.Delay(_exitGrace, graceCts.Token);
+                    try
+                    {
+                        while (await Task.WhenAny(next, grace) == next)
+                        {
+                            bool more;
+                            try { more = await next; }
+                            catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+                            {
+                                break;
+                            }
+                            if (!more) break;
+
+                            var late = Interpret(e.Current);
+                            if (late is not null) return late;
+
+                            next = e.MoveNextAsync().AsTask();
+                        }
+                    }
+                    finally
+                    {
+                        graceCts.Cancel();
+                    }
+
+                    if (ct.IsCancellationRequested)
+                        return new ProvisionOutcome(false, FailureCode.Cancelled, "Provisioning was cancelled.", stage);
+
                     return new ProvisionOutcome(false, FailureCode.ProvisioningFailed,
                         $"The virtual computer stopped unexpectedly (exit code {exit}).", stage, exit);
                 }

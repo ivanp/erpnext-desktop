@@ -32,7 +32,8 @@ public sealed class ProvisionMonitorTests
                 quietTime: TimeSpan.FromMinutes(10),
                 totalTimeout: TimeSpan.FromHours(2),
                 clock: () => Clock.Now,
-                pollInterval: TimeSpan.FromMilliseconds(5));
+                pollInterval: TimeSpan.FromMilliseconds(5),
+                exitGrace: TimeSpan.FromSeconds(1));
             Monitor.StageChanged += s => { lock (Stages) Stages.Add(s); };
             Monitor.Stuck += () => Interlocked.Increment(ref StuckCount);
             Monitor.LineReceived += _ => Interlocked.Increment(ref _seen);
@@ -200,5 +201,25 @@ public sealed class ProvisionMonitorTests
 
         Assert.Equal(FailureCode.ProvisioningFailed, outcome.Code);
         Assert.Contains("allowed time", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AFailedLineThatArrivesJustAfterTheProcessExit_KeepsItsStageAndCode()
+    {
+        var rig = new Rig();
+        var run = rig.Run();
+
+        rig.Say("SERPY_PROVISION_STARTED");
+        rig.Say("SERPY_STAGE services");
+        await rig.WaitForLines(2);
+        rig.Exit.SetResult(1);
+        await Task.Delay(20); // the failed marker is still on its way when the exit is seen
+        rig.Say("SERPY_PROVISION_FAILED services 5");
+
+        var outcome = await Finish(run);
+
+        Assert.Equal(FailureCode.ProvisioningFailed, outcome.Code);
+        Assert.Equal("services", outcome.Stage);
+        Assert.Equal(5, outcome.GuestExitCode);
     }
 }

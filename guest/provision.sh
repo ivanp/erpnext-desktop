@@ -32,10 +32,12 @@ main() {
   # packages retain the trixie candidate priority.
   printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260822T000000Z/ sid main' > /etc/apt/sources.list.d/serpy-python314.list
   printf '%s\n' 'Package: *' 'Pin: release a=unstable' 'Pin-Priority: 1' '' 'Package: python3.14 python3.14-dev python3.14-venv libpython3.14 libpython3.14-minimal libpython3.14-stdlib libpython3.14-dev' 'Pin: release a=unstable' 'Pin-Priority: 1001' > /etc/apt/preferences.d/serpy-python314
-  # MariaDB is pinned to its immutable minor-series archive rather than the
-  # mutable 11.8 repository endpoint.
   apt-get update -q
   apt-get install -y curl
+
+  stage database
+  # MariaDB is pinned to its immutable minor-series archive rather than the
+  # mutable 11.8 repository endpoint.
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://supplychain.mariadb.com/mariadb-keyring-2025.gpg -o /etc/apt/keyrings/mariadb-keyring.gpg
   printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/mariadb-keyring.gpg] https://archive.mariadb.org/mariadb-11.8.3/repo/debian trixie main' > /etc/apt/sources.list.d/serpy-mariadb.list

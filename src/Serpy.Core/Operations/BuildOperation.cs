@@ -70,7 +70,7 @@ public sealed class BuildOperation(
         var logPath = Path.Combine(KnownPaths.LogsDir, $"build-{operationId:N}.log");
 
         using var log = new OperationLog(logPath);
-        stateStore.Mutate(s => { s.LogPath = logPath; s.ActiveOperation = opKind; });
+        stateStore.Mutate(s => s.LogPath = logPath);
 
         void Report(string stage, string msg, int? pct = null, UpdateSeverity sev = UpdateSeverity.Info)
         {
@@ -304,13 +304,24 @@ public sealed class BuildOperation(
         if (File.Exists(StagingPath)) File.Delete(StagingPath);
     }
 
-    private static FailureCode ClassifyFailure(Exception ex) => ex switch
+    // The cause is often wrapped (the preflight wraps a failed request), so walk the chain.
+    private static FailureCode ClassifyFailure(Exception ex)
     {
-        TimeoutException => FailureCode.GuestConsoleClosed,
-        HttpRequestException => FailureCode.NetworkUnavailable,
-        IOException io when io.HResult == unchecked((int)0x80070070) => FailureCode.DiskFull,
-        _ => FailureCode.Unknown,
-    };
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case HttpRequestException:
+                    return FailureCode.NetworkUnavailable;
+                case IOException io when io.HResult == unchecked((int)0x80070070):
+                    return FailureCode.DiskFull;
+                case TimeoutException:
+                    return FailureCode.GuestConsoleClosed;
+            }
+        }
+
+        return FailureCode.Unknown;
+    }
 
     private static OperationResult Fail(Guid id, OperationKind kind, string msg, string log,
         FailureCode code = FailureCode.Unknown) =>

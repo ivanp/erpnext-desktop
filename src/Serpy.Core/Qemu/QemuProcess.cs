@@ -70,16 +70,17 @@ public sealed class QemuProcess : IAsyncDisposable
         }
         else if (logFile is not null)
         {
-            proc.OutputDataReceived += (_, e) =>
+            // An exception thrown from a Process event handler ends the host, so a log write that
+            // fails (disk full, file locked by a viewer) is dropped instead.
+            void Append(string text)
             {
-                if (e.Data is not null)
-                    File.AppendAllText(logFile, e.Data + "\n");
-            };
-            proc.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data is not null)
-                    File.AppendAllText(logFile, "[stderr] " + e.Data + "\n");
-            };
+                try { File.AppendAllText(logFile, text); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+
+            proc.OutputDataReceived += (_, e) => { if (e.Data is not null) Append(e.Data + "\n"); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) Append("[stderr] " + e.Data + "\n"); };
         }
 
         proc.Start();
