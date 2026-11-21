@@ -279,5 +279,18 @@ public static class UiText
     public static readonly string StopErpNext = Plain("Stop ERPNext");
     public static readonly string StartErpNext = Plain("Start ERPNext");
 
+    // The tray tooltip says the state in words (R34). Each one is a whole sentence, so it needs no join.
+    public static readonly string TraySettingUp = Plain("Serpy: setting up");
+    public static readonly string TrayStarting = Plain("Serpy: starting ERPNext");
+    public static readonly string TrayReady = Plain("Serpy: ERPNext is ready");
+    public static readonly string TrayStopped = Plain("Serpy: ERPNext is stopped");
+    public static readonly string TrayNeedsAttention = Plain("Serpy: needs attention");
+
+    private static readonly string TraySettingUpStepTemplate = Plain("Serpy: setting up, step {0} of {1}");
+
+    /// <summary>The tooltip while setup works. The step number counts the five stages of the strip, not the six internal steps.</summary>
+    public static string TraySettingUpStep(SetupStepId step) =>
+        string.Format(TraySettingUpStepTemplate, StripPosition(step), StripSteps);
+
     private static string GbText(long bytes) => $"{bytes / (1024.0 * 1024 * 1024):0.#} GB";
 }
