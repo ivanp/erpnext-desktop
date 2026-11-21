@@ -28,9 +28,11 @@ log() { echo "[init-data] $*"; }
 
 # A fixed command string is intentional: the validated site name is supplied
 # as $1 to the child shell, never interpolated into its source text.
+# bench is the command that provision.sh installs into its own environment and links onto the PATH.
+# The bench environment of the site (env/bin) holds frappe and erpnext, not the bench command.
 run_bench() {
     runuser -u "$FRAPPE_USER" -- sh -c \
-        'cd /home/frappe/frappe-bench && exec ./env/bin/bench "$@"' \
+        'cd /home/frappe/frappe-bench && exec bench "$@"' \
         serpy-bench "$@"
 }
 
