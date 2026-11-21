@@ -14,6 +14,15 @@ public sealed partial class DashboardViewModel : ObservableObject
     private IApplianceService? _service;
     private CancellationTokenSource? _operationCts;
 
+    /// <summary>Guided setup (U9). Presentation-only; service rules stay in Core.</summary>
+    public SetupViewModel Setup { get; }
+
+    /// <summary>Raised when the guided setup view should be shown or hidden.</summary>
+    public event EventHandler<bool>? SetupActiveChanged;
+
+    /// <summary>Raised when the primary action should show the guided setup screens.</summary>
+    public event EventHandler? ShowSetupRequested;
+
     // ── Observable state ──────────────────────────────────────────────────
 
     [ObservableProperty]
@@ -118,6 +127,13 @@ public sealed partial class DashboardViewModel : ObservableObject
     // ── Service injection ─────────────────────────────────────────────────
 
     public void SetService(IApplianceService service) => _service = service;
+    public DashboardViewModel()
+    {
+        Setup = new SetupViewModel(null);
+        Setup.SetupActivated += (_, _) => SetupActiveChanged?.Invoke(this, true);
+        Setup.SetupDeactivated += (_, _) => SetupActiveChanged?.Invoke(this, false);
+    }
+
 
     // ── Status polling ────────────────────────────────────────────────────
 
@@ -192,8 +208,10 @@ public sealed partial class DashboardViewModel : ObservableObject
 
         if (Status.RecommendedRoute == LaunchRoute.Setup || Status.Readiness != ReadinessState.Initialized)
         {
-            return InitializeAsync();
+            ShowSetupRequested?.Invoke(this, EventArgs.Empty);
+            return Task.CompletedTask;
         }
+
 
         if (Status.Health == HealthState.Crashed)
         {
@@ -248,6 +266,12 @@ public sealed partial class DashboardViewModel : ObservableObject
     public event EventHandler? ExitRequested;
     public event EventHandler<string>? OpenUrlRequested;
     public event EventHandler<bool>? AutostartRequested;
+    /// <summary>Late service attach for the guided-setup view model.</summary>
+    public void SetSetupService(IApplianceService service) => Setup.AttachService(service);
+
+    /// <summary>Applies a status poll to the guided-setup view model (screen recovery).</summary>
+    public void ApplySetupStatus(ApplianceStatus status) => Setup.ApplyStatus(status);
+
 
     /// <summary>Assigned by the App layer to collect site name + admin password or setup choice from the user.</summary>
     public Func<Task<SetupChoice?>>? SetupInputRequested { get; set; }

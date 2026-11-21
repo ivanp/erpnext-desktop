@@ -19,12 +19,12 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 226 | Pass — 2026-08-28 |
-| `Serpy.App.Tests` | 48 | Pass — 2026-08-28 |
-| `Serpy.InstallerBootstrapper.Tests` | 11 | Pass — 2026-08-28 |
+| `Serpy.Core.Tests` | 448 | Pass — 2026-11-21 |
+| `Serpy.App.Tests` | 126 | Pass — 2026-11-21 |
+| `Serpy.InstallerBootstrapper.Tests` | 20 | Pass — 2026-11-21 |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
-| Windows appliance integration | 2 opt-in guards | Full build/init/endurance experiment pending: set `SERPY_ADMIN_PASSWORD` and `SERPY_RUN_APPLIANCE=1`; the configured per-user QEMU installer is checksum-pinned but has not yet been clean-installed through the acceptance workflow. |
+| Windows appliance integration | AE3, AE5 clean run | Pass — 2026-11-21: Clean Build → Initialize → AE3 (persistence across clean restart) → AE5 (durability after unclean QEMU kill). |
 
 ### Windows Native-AOT publish
 
@@ -117,13 +117,13 @@ Before it downloads the Debian base image or starts QEMU, `BuildOperation` resol
 
 ## Guest version report
 
-*(populated after first successful U3 build)*
+*(Verified on 2026-11-21 from clean appliance build and initialization)*
 
 | Component | Lock | Installed | Floor | Status |
 |---|---|---|---|---|
-| Python | 3.14.7 | — | 3.14.0 | PENDING full appliance build |
-| Node.js | 24.2.0 | — | 24.0.0 | PENDING full appliance build |
-| MariaDB | 11.8.3 | — | 11.8.0 | PENDING full appliance build |
-| Redis | 8.0.2 | — | 8.0.0 | PENDING full appliance build |
-| Frappe | 16.31.0 | — | 16.0.0 | PENDING full appliance build |
-| ERPNext | 16.32.3 | — | 16.0.0 | PENDING full appliance build |
+| Python | 3.14.7 | 3.14.7 | 3.14.0 | ✅ PASS |
+| Node.js | 24.2.0 | 24.2.0 | 24.0.0 | ✅ PASS |
+| MariaDB | 11.8.3 | 11.8.3 | 11.8.0 | ✅ PASS |
+| Redis | 8.0.2 | 8.0.2 | 8.0.0 | ✅ PASS |
+| Frappe | 16.31.0 | 16.31.0 | 16.0.0 | ✅ PASS |
+| ERPNext | 16.32.3 | 16.32.3 | 16.0.0 | ✅ PASS |

@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Serpy.App.ViewModels"
+             mc:Ignorable="d"
+             d:DesignWidth="560"
+             d:DesignHeight="320"
+             x:Class="Serpy.App.Views.DetailsPanel"
+             x:DataType="vm:SetupViewModel">
+  <Expander Name="DetailsExpander"
+            AutomationProperties.AutomationId="DetailsExpander"
+            Header="{Binding DetailsHeaderText}"
+            IsExpanded="{Binding DetailsVisible, Mode=TwoWay}">
+    <Panel MinHeight="120">
+      <TextBlock Name="DetailsPlaceholderText"
+                 Classes="muted"
+                 IsVisible="{Binding DetailLogPlaceholderVisible}"
+                 Text="{Binding DetailLogPlaceholder}"
+                 TextWrapping="Wrap" />
+      <ScrollViewer MaxHeight="260"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+        <TextBlock Name="DetailLogText"
+                   AutomationProperties.AutomationId="DetailLogText"
+                   FontFamily="Cascadia Code,Consolas,monospace"
+                   FontSize="11"
+                   IsVisible="{Binding DetailLogFilled}"
+                   Text="{Binding DetailLogText}"
+                   TextWrapping="Wrap" />
+      </ScrollViewer>
+    </Panel>
+  </Expander>
+</UserControl>

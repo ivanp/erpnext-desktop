@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Serpy.App.Text;
 using Serpy.Core.Contracts;
 using Serpy.App.Platform;
 using Serpy.App.ViewModels;
@@ -44,6 +45,14 @@ public sealed class App : Application
         _dashboardVm = new DashboardViewModel();
         DataContext = _dashboardVm;
 
+        if (Service is not null)
+        {
+            _dashboardVm.SetService(Service);
+            _dashboardVm.SetSetupService(Service);
+        }
+        WireSetupEvents(_dashboardVm);
+        _dashboardVm.OperationUpdated += (_, update) => _splashVm?.ApplyUpdate(update);
+
         // Wire events from ViewModel to App platform handlers.
         _dashboardVm.ShowDashboardRequested += (_, _) => ShowDashboardWindow();
         _dashboardVm.ExitRequested         += (_, _) => HandleExitRequest();
@@ -52,9 +61,6 @@ public sealed class App : Application
         _dashboardVm.CredentialInputRequested      = RequestCredentialsAsync;
         _dashboardVm.RecoverInputRequested         = RequestRecoveryImageAsync;
         _dashboardVm.LegacyConsentInputRequested   = RequestLegacyConsentAsync;
-        if (Service is not null)
-            _dashboardVm.SetService(Service);
-        _dashboardVm.OperationUpdated += (_, update) => _splashVm?.ApplyUpdate(update);
         if (OperatingSystem.IsWindows())
         {
             _dashboardVm.AutostartRequested += (_, enabled) => HandleAutostartRequest(enabled);
@@ -96,6 +102,12 @@ public sealed class App : Application
     private void HandlePostStatusUpdate()
     {
         if (_dashboardVm is null) return;
+        // Guided setup owns the window while it is active: no auto-browser (AE13), no splash.
+        if (_dashboardVm.Setup.SetupActive)
+        {
+            DismissSplash();
+        }
+
         var status = _dashboardVm.Status;
 
         // Auto-open browser once when appliance reaches healthy (AE8, R17).
@@ -128,6 +140,38 @@ public sealed class App : Application
         _splashWindow.Show();
     }
 
+
+    // ── Guided setup (U9) ─────────────────────────────────────────────────
+
+    private void WireSetupEvents(DashboardViewModel vm)
+    {
+        var setup = vm.Setup;
+        vm.SetupActiveChanged += (_, active) =>
+        {
+            if (active) ShowDashboardWindow();
+        };
+        vm.ShowSetupRequested += (_, _) => setup.Activate();
+        setup.StartSetupRequested += (_, _) => ShowDashboardWindow();
+        setup.SetupStarted += (_, _) => ShowDashboardWindow();
+        setup.OpenUrlRequested += (_, url) => _browser.OpenOnce(url);
+        setup.SaveDetailsRequested += (_, content) => _ = SaveSetupDetailsAsync(content);
+        // RestartNowRequested / RestartLaterRequested are completed by U7 (elevation + restart flow);
+        // U9 only raises them.
+    }
+
+    private async Task SaveSetupDetailsAsync(string content)
+    {
+        if (_dashboardWindow is null) ShowDashboardWindow();
+        if (_dashboardWindow?.StorageProvider is not { CanSave: true } storage) return;
+        var file = await storage.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            Title = UiText.SaveDetails,
+            SuggestedFileName = "serpy-setup-details.txt",
+            DefaultExtension = "txt",
+        });
+        if (file is null) return;
+        await System.IO.File.WriteAllTextAsync(file.Path.LocalPath, content);
+    }
     private void DismissSplash()
     {
         _splashWindow?.Close();

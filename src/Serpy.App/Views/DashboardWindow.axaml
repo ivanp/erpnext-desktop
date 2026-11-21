@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Serpy.App.ViewModels"
+        xmlns:views="using:Serpy.App.Views"
         x:Class="Serpy.App.Views.DashboardWindow"
         x:DataType="vm:DashboardViewModel"
         Title="Serpy"
@@ -8,103 +9,116 @@
         MinWidth="420" MinHeight="360"
         WindowStartupLocation="CenterScreen">
 
-  <DockPanel Margin="20">
+  <Panel>
+    <!-- Guided setup screens (U9); dashboard stays mounted beneath for status-driven compatibility -->
+    <Panel x:Name="SetupHostPanel" IsVisible="{Binding Setup.SetupActive}">
+      <views:SetupView x:Name="SetupScreenHost"
+                       AutomationProperties.AutomationId="SetupScreenHost"
+                       DataContext="{Binding Setup}"
+                       IsVisible="{Binding #SetupHostPanel.IsVisible}" />
+    </Panel>
 
-    <!-- Header: brand + status badge -->
-    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,14">
-      <TextBlock Text="Serpy" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
-      <Border Background="#EEF1F4" CornerRadius="12" Padding="10,5">
-        <TextBlock AutomationProperties.AutomationId="StatusBadge" Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
-      </Border>
-      <!-- Loopback URL when healthy -->
-      <TextBlock AutomationProperties.AutomationId="LoopbackUrlText"
-                 Text="{Binding Status.LoopbackUrl}"
-                 FontSize="12" Foreground="#2563EB"
-                 VerticalAlignment="Center"
-                 IsVisible="{Binding IsHealthy}"/>
-    </StackPanel>
+    <!-- Everyday dashboard -->
+    <DockPanel Margin="20" IsVisible="{Binding !Setup.SetupActive}">
+      <Panel Name="DashboardPanel">
 
-    <!-- Stage text + progress -->
-    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,14">
-      <TextBlock AutomationProperties.AutomationId="StageText" Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
-      <ProgressBar AutomationProperties.AutomationId="ProgressBar" Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
-    </StackPanel>
+        <!-- Header: brand + status badge -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,14">
+          <TextBlock Text="Serpy" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
+          <Border Background="#EEF1F4" CornerRadius="12" Padding="10,5">
+            <TextBlock AutomationProperties.AutomationId="StatusBadge" Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
+          </Border>
+          <!-- Loopback URL when healthy -->
+          <TextBlock AutomationProperties.AutomationId="LoopbackUrlText"
+                     Text="{Binding Status.LoopbackUrl}"
+                     FontSize="12" Foreground="#2563EB"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding IsHealthy}"/>
+        </StackPanel>
 
-    <!-- Primary action row -->
-    <!-- Primary action follows readiness/health, not a fixed Start command. -->
-    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-      <Button AutomationProperties.AutomationId="PrimaryActionButton"
-              Content="{Binding PrimaryActionLabel}"
-              Command="{Binding PrimaryActionCommand}"
-              IsEnabled="{Binding CanExecutePrimaryAction}"
-              Classes="accent"/>
+        <!-- Stage text + progress -->
+        <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,14">
+          <TextBlock AutomationProperties.AutomationId="StageText" Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
+          <ProgressBar AutomationProperties.AutomationId="ProgressBar" Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
+        </StackPanel>
 
-      <!-- Build (NotBuilt only) -->
-      <Button AutomationProperties.AutomationId="BuildButton"
-              Content="Build…"
-              Command="{Binding BuildCommand}"
-              IsVisible="{Binding !CanStart}"/>
+        <!-- Primary action row -->
+        <!-- Primary action follows readiness/health, not a fixed Start command. -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+          <Button AutomationProperties.AutomationId="PrimaryActionButton"
+                  Content="{Binding PrimaryActionLabel}"
+                  Command="{Binding PrimaryActionCommand}"
+                  IsEnabled="{Binding CanExecutePrimaryAction}"
+                  Classes="accent"/>
 
-      <!-- Initialize (Built only) -->
-      <Button AutomationProperties.AutomationId="InitializeButton"
-              Content="Initialize…"
-              Command="{Binding InitializeCommand}"/>
+          <!-- Build (NotBuilt only) -->
+          <Button AutomationProperties.AutomationId="BuildButton"
+                  Content="Build…"
+                  Command="{Binding BuildCommand}"
+                  IsVisible="{Binding !CanStart}"/>
 
-      <!-- Stop -->
-      <Button AutomationProperties.AutomationId="StopButton"
-              Content="Stop"
-              Command="{Binding StopCommand}"
-              IsEnabled="{Binding CanStop}"/>
+          <!-- Initialize (Built only) -->
+          <Button AutomationProperties.AutomationId="InitializeButton"
+                  Content="Initialize…"
+                  Command="{Binding InitializeCommand}"/>
 
-      <!-- Restart -->
-      <Button AutomationProperties.AutomationId="RestartButton"
-              Content="Restart"
-              Command="{Binding RestartCommand}"
-              IsEnabled="{Binding CanRestart}"/>
+          <!-- Stop -->
+          <Button AutomationProperties.AutomationId="StopButton"
+                  Content="Stop"
+                  Command="{Binding StopCommand}"
+                  IsEnabled="{Binding CanStop}"/>
 
-      <Button AutomationProperties.AutomationId="RecoverButton"
-              Content="Recover…"
-              Command="{Binding RecoverCommand}"
-              IsEnabled="{Binding CanRecover}"/>
+          <!-- Restart -->
+          <Button AutomationProperties.AutomationId="RestartButton"
+                  Content="Restart"
+                  Command="{Binding RestartCommand}"
+                  IsEnabled="{Binding CanRestart}"/>
 
-      <!-- Open ERPNext (healthy only) -->
-      <Button AutomationProperties.AutomationId="OpenErpNextButton"
-              Content="Open ERPNext ↗"
-              Command="{Binding OpenErpNextCommand}"
-              IsEnabled="{Binding IsHealthy}"/>
+          <Button AutomationProperties.AutomationId="RecoverButton"
+                  Content="Recover…"
+                  Command="{Binding RecoverCommand}"
+                  IsEnabled="{Binding CanRecover}"/>
 
-      <!-- Cancel in-flight operation -->
-      <Button AutomationProperties.AutomationId="CancelButton"
-              Content="✕"
-              Command="{Binding CancelCommand}"
-              IsEnabled="{Binding IsOperationRunning}"
-              ToolTip.Tip="Cancel current operation"/>
-    </StackPanel>
+          <!-- Open ERPNext (healthy only) -->
+          <Button AutomationProperties.AutomationId="OpenErpNextButton"
+                  Content="Open ERPNext ↗"
+                  Command="{Binding OpenErpNextCommand}"
+                  IsEnabled="{Binding IsHealthy}"/>
 
-    <CheckBox AutomationProperties.AutomationId="StartAtSignInCheckbox"
-              DockPanel.Dock="Top"
-              Margin="0,8,0,0"
-              Content="Start Serpy at sign-in"
-              IsChecked="{Binding StartAtSignIn}"
-              Command="{Binding SetAutostartCommand}"
-              CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}" />
+          <!-- Cancel in-flight operation -->
+          <Button AutomationProperties.AutomationId="CancelButton"
+                  Content="✕"
+                  Command="{Binding CancelCommand}"
+                  IsEnabled="{Binding IsOperationRunning}"
+                  ToolTip.Tip="Cancel current operation"/>
+        </StackPanel>
 
-    <!-- Show-details disclosure (off by default, R17) -->
-    <Expander AutomationProperties.AutomationId="DetailsExpander"
-              DockPanel.Dock="Bottom"
-              Header="Show details"
-              IsExpanded="{Binding ShowDetails}"
-              Margin="0,8,0,0">
-      <ScrollViewer MaxHeight="160">
-        <TextBlock AutomationProperties.AutomationId="DetailLogText"
-                   Text="{Binding DetailLog}"
-                   FontFamily="Cascadia Code,Consolas,monospace"
-                   FontSize="11"
-                   TextWrapping="Wrap"
-                   Padding="10"/>
-      </ScrollViewer>
-    </Expander>
+        <CheckBox AutomationProperties.AutomationId="StartAtSignInCheckbox"
+                  DockPanel.Dock="Top"
+                  Margin="0,8,0,0"
+                  Content="Start Serpy at sign-in"
+                  IsChecked="{Binding StartAtSignIn}"
+                  Command="{Binding SetAutostartCommand}"
+                  CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}" />
 
-    <Grid/>
-  </DockPanel>
+        <!-- Show-details disclosure (off by default, R17) -->
+        <Expander AutomationProperties.AutomationId="DetailsExpander"
+                  DockPanel.Dock="Bottom"
+                  Header="Show details"
+                  IsExpanded="{Binding ShowDetails}"
+                  Margin="0,8,0,0">
+          <ScrollViewer MaxHeight="160">
+            <TextBlock AutomationProperties.AutomationId="DetailLogText"
+                       Text="{Binding DetailLog}"
+                       FontFamily="Cascadia Code,Consolas,monospace"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Padding="10"/>
+          </ScrollViewer>
+        </Expander>
+
+        <Grid/>
+      </Panel>
+    </DockPanel>
+  </Panel>
 </Window>

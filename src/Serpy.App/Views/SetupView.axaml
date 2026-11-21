@@ -1,0 +1,263 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Serpy.App.ViewModels"
+             xmlns:ui="using:Serpy.App.Text"
+             xmlns:views="using:Serpy.App.Views"
+             mc:Ignorable="d"
+             d:DesignWidth="640"
+             d:DesignHeight="620"
+             x:Class="Serpy.App.Views.SetupView"
+             x:DataType="vm:SetupViewModel">
+  <Panel Name="SetupScreenHost"
+         AutomationProperties.AutomationId="SetupScreenHost">
+
+    <!-- ============ Welcome (mockup s2) ============ -->
+    <ScrollViewer IsVisible="{Binding ShowWelcome}">
+      <StackPanel Name="WelcomeScreen"
+                  AutomationProperties.AutomationId="WelcomeScreen"
+                  Margin="24"
+                  Spacing="12">
+        <TextBlock Classes="h1" Text="{x:Static ui:UiText.WelcomeTitle}" />
+        <TextBlock Classes="muted" Text="{x:Static ui:UiText.WelcomeBody}" TextWrapping="Wrap" />
+        <ItemsControl ItemsSource="{Binding WelcomeFacts}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <TextBlock Classes="fact" Text="{Binding}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <CheckBox Name="WelcomeStartAtSignInCheck"
+                  AutomationProperties.AutomationId="WelcomeStartAtSignInCheck"
+                  Content="{x:Static ui:UiText.StartAtSignInLabel}"
+                  IsChecked="{Binding StartAtSignIn, Mode=TwoWay}" />
+        <Button Name="StartSetupButton"
+                AutomationProperties.AutomationId="StartSetupButton"
+                Classes="primary"
+                Command="{Binding StartSetupCommand}"
+                Content="{x:Static ui:UiText.StartSetup}" />
+        <views:DetailsPanel />
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- ============ Checking (mockup s3) ============ -->
+    <StackPanel Name="CheckingScreen"
+                AutomationProperties.AutomationId="CheckingScreen"
+                Margin="24"
+                Spacing="12"
+                IsVisible="{Binding ShowChecking}">
+      <TextBlock Classes="h1" Text="{x:Static ui:UiText.CheckingTitle}" />
+      <TextBlock Classes="muted" Text="{x:Static ui:UiText.StayAwake}" TextWrapping="Wrap" />
+      <views:Strip />
+      <views:DetailsPanel />
+      <Button Name="CheckAgainButton"
+              AutomationProperties.AutomationId="CheckAgainButton"
+              Command="{Binding CheckAgainCommand}"
+              Content="{x:Static ui:UiText.CheckAgain}" />
+    </StackPanel>
+
+    <!-- ============ Cannot run (mockup s4) ============ -->
+    <StackPanel Name="CannotRunScreen"
+                AutomationProperties.AutomationId="CannotRunScreen"
+                Margin="24"
+                Spacing="12"
+                IsVisible="{Binding ShowCannotRun}">
+      <TextBlock Name="CannotRunHeadlineText"
+                 AutomationProperties.AutomationId="CannotRunHeadlineText"
+                 Classes="h1"
+                 Text="{Binding FailureHeadline}" />
+      <TextBlock Classes="muted" Text="{Binding FailureDetail}" TextWrapping="Wrap" />
+      <TextBlock Name="CannotRunWhatToDoText"
+                 AutomationProperties.AutomationId="CannotRunWhatToDoText"
+                 Text="{Binding FailureWhatToDo}"
+                 TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="CannotRunCheckAgainButton"
+                AutomationProperties.AutomationId="CheckAgainButton"
+                Command="{Binding CheckAgainCommand}"
+                Content="{x:Static ui:UiText.CheckAgain}" />
+        <Button Name="CannotRunSaveButton"
+                AutomationProperties.AutomationId="CannotRunSaveButton"
+                Command="{Binding SaveDetailsCommand}"
+                Content="{x:Static ui:UiText.SaveDetails}" />
+      </StackPanel>
+      <views:DetailsPanel />
+    </StackPanel>
+
+    <!-- ============ Restart needed (mockup s5) ============ -->
+    <StackPanel Name="RestartScreen"
+                AutomationProperties.AutomationId="RestartScreen"
+                Margin="24"
+                Spacing="12"
+                IsVisible="{Binding ShowRestartNeeded}">
+      <TextBlock Name="RestartHeadlineText"
+                 AutomationProperties.AutomationId="RestartHeadlineText"
+                 Classes="h1"
+                 Text="{Binding FailureHeadline}" />
+      <TextBlock Classes="muted" Text="{Binding FailureDetail}" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding FailureWhatToDo}" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="RestartNowButton"
+                AutomationProperties.AutomationId="RestartNowButton"
+                Classes="primary"
+                Command="{Binding RestartNowCommand}"
+                Content="{x:Static ui:UiText.RestartNow}" />
+        <Button Name="RestartLaterButton"
+                AutomationProperties.AutomationId="RestartLaterButton"
+                Command="{Binding RestartLaterCommand}"
+                Content="{x:Static ui:UiText.RestartLater}" />
+      </StackPanel>
+      <views:DetailsPanel />
+    </StackPanel>
+
+    <!-- ============ Password (mockup s14) ============ -->
+    <StackPanel Name="PasswordScreen"
+                AutomationProperties.AutomationId="PasswordScreen"
+                Margin="24"
+                Spacing="12"
+                IsVisible="{Binding ShowPasswordNeeded}">
+      <TextBlock Classes="h1" Text="{x:Static ui:UiText.PasswordTitle}" />
+      <TextBlock Classes="muted" Text="{x:Static ui:UiText.PasswordBody}" TextWrapping="Wrap" />
+      <TextBox Name="PasswordInput"
+               AutomationProperties.AutomationId="PasswordInput"
+               PasswordChar="•"
+               Text="{Binding PasswordInput, Mode=TwoWay}" />
+      <TextBlock Name="PasswordWrongText"
+                 Classes="muted"
+                 IsVisible="{Binding PasswordWrongVisible}"
+                 Text="{x:Static ui:UiText.PasswordWrong}" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="PasswordSubmitButton"
+                AutomationProperties.AutomationId="PasswordSubmitButton"
+                Classes="primary"
+                Command="{Binding SubmitPasswordCommand}"
+                Content="{x:Static ui:UiText.Continue}" />
+        <Button Name="PasswordCancelButton"
+                AutomationProperties.AutomationId="PasswordCancelButton"
+                Command="{Binding CancelPasswordCommand}"
+                Content="{x:Static ui:UiText.Cancel}" />
+      </StackPanel>
+      <views:DetailsPanel />
+    </StackPanel>
+
+    <!-- ============ Downloads (mockup s6/s7) ============ -->
+    <StackPanel Name="DownloadsScreen"
+                AutomationProperties.AutomationId="DownloadsScreen"
+                Margin="24"
+                Spacing="12"
+                IsVisible="{Binding ShowDownloads}">
+      <TextBlock Classes="h1" Text="{x:Static ui:UiText.DownloadsTitle}" />
+      <TextBlock Classes="muted" Text="{x:Static ui:UiText.DownloadsMostlyCached}" TextWrapping="Wrap" />
+      <TextBlock Name="CachedPartsText" Text="{Binding CachedPartsLine}" TextWrapping="Wrap" />
+      <views:Strip />
+      <views:DetailsPanel />
+    </StackPanel>
+
+    <!-- ============ Installing (mockup s8/s9) ============ -->
+    <ScrollViewer IsVisible="{Binding ShowInstalling}">
+      <StackPanel Name="InstallingScreen"
+                  AutomationProperties.AutomationId="InstallingScreen"
+                  Margin="24"
+                  Spacing="12">
+        <TextBlock Classes="h1" Text="{x:Static ui:UiText.InstallingTitle}" />
+        <views:Strip />
+        <ProgressBar Name="OverallProgressBar"
+                     AutomationProperties.AutomationId="OverallProgressBar"
+                     Minimum="0"
+                     Maximum="100"
+                     Value="{Binding OverallPercent, Mode=OneWay}" />
+        <TextBlock Name="ActivityText"
+                   AutomationProperties.AutomationId="ActivityText"
+                   Text="{Binding ActivityText}" />
+        <TextBlock Name="StepElapsedText"
+                   AutomationProperties.AutomationId="StepElapsedText"
+                   Classes="muted"
+                   Text="{Binding StepElapsedText}" />
+        <Border Name="QuietBanner"
+                AutomationProperties.AutomationId="QuietBanner"
+                Classes="banner"
+                IsVisible="{Binding ShowQuietBanner}">
+          <StackPanel Spacing="8">
+            <TextBlock Classes="muted" Text="{x:Static ui:UiText.QuietAdvice}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Name="KeepWaitingButton"
+                      AutomationProperties.AutomationId="KeepWaitingButton"
+                      Command="{Binding KeepWaitingCommand}"
+                      Content="{x:Static ui:UiText.KeepWaiting}" />
+              <Button Name="TryAgainStepButton"
+                      AutomationProperties.AutomationId="TryAgainStepButton"
+                      Command="{Binding TryAgainStepCommand}"
+                      Content="{x:Static ui:UiText.TryAgain}" />
+              <Button Name="CancelSetupButton"
+                      AutomationProperties.AutomationId="CancelSetupButton"
+                      Command="{Binding CancelSetupCommand}"
+                      Content="{x:Static ui:UiText.Cancel}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+        <views:DetailsPanel />
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- ============ Ready (mockup s11) ============ -->
+    <ScrollViewer IsVisible="{Binding ShowReady}">
+      <StackPanel Name="ReadyScreen"
+                  AutomationProperties.AutomationId="ReadyScreen"
+                  Margin="24"
+                  Spacing="12">
+        <TextBlock Classes="h1" Text="{x:Static ui:UiText.ReadyTitle}" />
+        <TextBlock Classes="muted" Text="{x:Static ui:UiText.ReadyBody}" TextWrapping="Wrap" />
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+          <TextBlock Grid.Row="0" Grid.Column="0" Classes="muted" Text="{x:Static ui:UiText.UsernameLabel}" />
+          <TextBlock Grid.Row="0" Grid.Column="1" Name="ReadyUsernameText" Text="{Binding ReadyUsername}" />
+          <TextBlock Grid.Row="1" Grid.Column="0" Classes="muted" Text="{x:Static ui:UiText.PasswordLabel}" />
+          <TextBlock Grid.Row="1" Grid.Column="1" Name="ReadyPasswordText" Text="{Binding ReadyPassword}" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Name="OpenErpNextButton"
+                  AutomationProperties.AutomationId="OpenErpNextButton"
+                  Classes="primary"
+                  Command="{Binding OpenErpNextCommand}"
+                  Content="{x:Static ui:UiText.OpenErpNext}" />
+          <Button Name="ReadySaveButton"
+                  AutomationProperties.AutomationId="ReadySaveButton"
+                  Command="{Binding SaveDetailsCommand}"
+                  Content="{x:Static ui:UiText.SaveDetails}" />
+        </StackPanel>
+        <views:DetailsPanel />
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- ============ Problem (mockup s12/s13) ============ -->
+    <ScrollViewer IsVisible="{Binding ShowProblem}">
+      <StackPanel Name="ProblemScreen"
+                  AutomationProperties.AutomationId="ProblemScreen"
+                  Margin="24"
+                  Spacing="12">
+        <TextBlock Name="FailureHeadlineText"
+                   AutomationProperties.AutomationId="FailureHeadlineText"
+                   Classes="h1"
+                   Text="{Binding FailureHeadline}" />
+        <TextBlock Classes="muted" Text="{Binding FailureDetail}" TextWrapping="Wrap" />
+        <TextBlock Name="FailureWhatToDoText"
+                   AutomationProperties.AutomationId="FailureWhatToDoText"
+                   Text="{Binding FailureWhatToDo}"
+                   TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Name="TryAgainButton"
+                  AutomationProperties.AutomationId="TryAgainButton"
+                  Classes="primary"
+                  Command="{Binding TryAgainCommand}"
+                  Content="{x:Static ui:UiText.TryAgain}" />
+          <Button Name="SaveDetailsButton"
+                  AutomationProperties.AutomationId="SaveDetailsButton"
+                  Command="{Binding SaveDetailsCommand}"
+                  Content="{x:Static ui:UiText.SaveDetails}" />
+        </StackPanel>
+        <views:Strip />
+        <views:DetailsPanel />
+      </StackPanel>
+    </ScrollViewer>
+  </Panel>
+</UserControl>

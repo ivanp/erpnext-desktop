@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Serpy.App.ViewModels"
+             mc:Ignorable="d"
+             d:DesignWidth="560"
+             d:DesignHeight="28"
+             x:Class="Serpy.App.Views.Strip"
+             x:DataType="vm:SetupViewModel">
+  <ItemsControl Name="StepperList"
+                AutomationProperties.AutomationId="StepperList"
+                ItemsSource="{Binding StripItems}">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <StackPanel Orientation="Horizontal" Spacing="12" />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="vm:SetupStripItem">
+        <TextBlock AutomationProperties.AutomationId="{Binding AutomationId, Mode=OneWay}">
+          <Run Text="{Binding Label, Mode=OneWay}" />
+          <Run Text="{Binding StateText, Mode=OneWay}" Foreground="#6B7280" />
+        </TextBlock>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>
