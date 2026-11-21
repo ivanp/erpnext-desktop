@@ -76,6 +76,35 @@ public sealed class CredentialSafetyTests
     }
 
     [Fact]
+    public void InitDataScript_SeedsTheBenchFilesFromTheImage_BeforeTheEmptySitesTreeIsBound()
+    {
+        // The bind mount hides the sites/ directory of the image. apps.txt, common_site_config.json and
+        // assets/ live there, so they must be copied to the data disk first, or site creation fails.
+        var script = File.ReadAllText(ScriptPath);
+        var seed = script.IndexOf("cp -a \"$FRAPPE_DIR/sites/.\" \"$MOUNT_POINT/frappe/sites/\"", StringComparison.Ordinal);
+        var ownership = script.IndexOf(
+            "chown -R \"$FRAPPE_USER\":\"$FRAPPE_USER\" \"$MOUNT_POINT/frappe\"", StringComparison.Ordinal);
+        var bind = script.IndexOf("mount --bind \"$MOUNT_POINT/frappe/sites\"", StringComparison.Ordinal);
+        var firstUse = script.IndexOf("_new_site(", StringComparison.Ordinal);
+
+        Assert.True(seed >= 0, "The bench files of the image must be copied to the data disk.");
+        Assert.True(seed < ownership, "Ownership must cover the copied files, so the copy comes first.");
+        Assert.True(seed < bind, "The copy must run before the bind hides the sites directory of the image.");
+        Assert.True(bind < firstUse, "The site is created on the bound tree.");
+    }
+
+    [Fact]
+    public void InitDataScript_SeedsOnlyWhenTheDataDiskHasNoBenchFiles_SoARerunNeverOverwritesASite()
+    {
+        var script = File.ReadAllText(ScriptPath);
+        var guard = script.IndexOf("if [ ! -f \"$MOUNT_POINT/frappe/sites/apps.txt\" ]; then", StringComparison.Ordinal);
+        var seed = script.IndexOf("cp -a \"$FRAPPE_DIR/sites/.\"", StringComparison.Ordinal);
+
+        Assert.True(guard >= 0, "The copy must be guarded by the presence of apps.txt on the data disk.");
+        Assert.True(guard < seed, "The guard must wrap the copy.");
+    }
+
+    [Fact]
     public void InitDataScript_PersistsDataAndBindMountsBeforeEnablingAppliance()
     {
         var script = File.ReadAllText(ScriptPath);

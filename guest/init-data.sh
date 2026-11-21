@@ -52,6 +52,19 @@ fi
 # -- Persistent directories -------------------------------------------------
 log "Creating /data subdirectories…"
 mkdir -p "$MOUNT_POINT/mariadb" "$MOUNT_POINT/frappe/sites"
+
+# The bench keeps its own files directly under sites/: apps.txt (which apps exist), apps.json,
+# common_site_config.json (the redis and port settings) and assets/ (the built CSS and JS that nginx
+# serves). The image build created them in the real sites/ directory, and the bind mount below hides
+# that directory behind the empty one on the data disk, so they are copied across first. A site
+# created on an empty tree fails at once ("App erpnext not in apps.txt"). The copy keeps ownership
+# and the asset symlinks, and it runs only when the data disk does not have them yet, so running
+# this script again after an interrupted first run never overwrites a site.
+if [ ! -f "$MOUNT_POINT/frappe/sites/apps.txt" ]; then
+    log "Seeding the bench files from the image into $MOUNT_POINT/frappe/sites…"
+    cp -a "$FRAPPE_DIR/sites/." "$MOUNT_POINT/frappe/sites/"
+fi
+
 # The mounted sites tree must be writable by the unprivileged Frappe process
 # before it creates the first site and its site_config.json.
 chown -R "$FRAPPE_USER":"$FRAPPE_USER" "$MOUNT_POINT/frappe"

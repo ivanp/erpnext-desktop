@@ -36,6 +36,12 @@ mariadb-upgrade --user=root
 log "Running bench migrate on $SITE_NAME…"
 su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench --site $SITE_NAME migrate"
 
+# The assets on the data disk were built by the previous system image. A replacement image can carry
+# different app code, so its bundle names and contents differ, and migrate does not rebuild them.
+# Build them again into the bound sites tree. This path has not been run yet, so it is untested.
+log "Rebuilding the assets for the new system image…"
+su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench build --production"
+
 # Regenerate nginx config for the new system.
 su - "$FRAPPE_USER" -c "cd $FRAPPE_DIR && bench setup nginx"
 cp "$FRAPPE_DIR/config/nginx.conf" /etc/nginx/conf.d/frappe.conf
