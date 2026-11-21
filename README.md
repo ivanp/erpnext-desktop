@@ -13,7 +13,7 @@ Two-disk model:
 
 ## Status
 
-The source implements U1–U7 and deterministic verification. The Windows appliance build, initialization, persistence, recovery, and durability experiments are pending the opt-in acceptance run. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-08-22-0040-feat-qemu-erpnext-appliance-dotnet-avalonia-windows-host-plan.md` and `docs/results.md` for exact evidence.
+Guided setup (PC check, one Windows permission prompt, parallel cached downloads, offline build, company data, start), tray states, notifications and the one-click MSI are implemented and covered by deterministic tests. A complete clean install through the MSI, the restricted-network offline build, and the second-run-downloads-nothing check are pending the acceptance run recorded in `docs/results.md`. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-11-20-2151-feat-easy-install-experience-plan.md` and `docs/results.md` for exact evidence.
 
 - Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; the per-user installer delivery path awaits a clean delivery-chain run.
 - Deterministic tests (2026-11-21): `Serpy.Core.Tests` 496 pass, `Serpy.App.Tests` 153 pass, `Serpy.InstallerBootstrapper.Tests` 20 pass.
