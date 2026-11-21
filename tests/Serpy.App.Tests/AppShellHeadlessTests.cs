@@ -179,4 +179,70 @@ public sealed class AppShellHeadlessTests
         Assert.Empty(service.CalledOperations);
     }
 
+
+    [AvaloniaFact]
+    public void Setup_InactiveDashboard_ShowsDashboardNotSetupScreens()
+    {
+        var vm = new DashboardViewModel
+        {
+            Status = new ApplianceStatus(ReadinessState.NotBuilt, HealthState.Stopped, null, null, null, null),
+        };
+        var window = new DashboardWindow { DataContext = vm };
+
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.Setup.SetupActive);
+        Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), b => b.Text == "Serpy");
+        var host = window.GetVisualDescendants().OfType<SetupView>().First();
+        Assert.False(host.IsVisible);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Setup_Activated_ShowsSetupViewWithWelcomeScreen()
+    {
+        var vm = new DashboardViewModel
+        {
+            Status = new ApplianceStatus(ReadinessState.NotBuilt, HealthState.Stopped, null, null, null, null),
+        };
+        var window = new DashboardWindow { DataContext = vm };
+
+        window.Show();
+        vm.Setup.Activate();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(vm.Setup.SetupActive);
+        var host = window.GetVisualDescendants().OfType<SetupView>().FirstOrDefault();
+        Assert.NotNull(host);
+        var startButton = window.GetVisualDescendants().OfType<Button>()
+            .First(b => b.Name == "StartSetupButton");
+        var check = window.GetVisualDescendants().OfType<CheckBox>()
+            .First(c => c.Name == "WelcomeStartAtSignInCheck");
+        Assert.True(check.IsChecked ?? false);
+        Assert.True(startButton.IsVisible);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Setup_DetailsExpander_TogglesDetailLogVisibility()
+    {
+        var vm = new DashboardViewModel
+        {
+            Status = new ApplianceStatus(ReadinessState.NotBuilt, HealthState.Stopped, null, null, null, null),
+        };
+        var window = new DashboardWindow { DataContext = vm };
+
+        window.Show();
+        vm.Setup.Activate();
+        Dispatcher.UIThread.RunJobs();
+        var expander = window.GetVisualDescendants().OfType<Expander>()
+            .First(e => e.Name == "DetailsExpander");
+        vm.Setup.ToggleDetailsCommand.Execute(null);
+        Assert.True(expander.IsVisible);
+        Assert.True(vm.Setup.DetailsVisible);
+
+        window.Close();
+    }
 }
