@@ -103,6 +103,11 @@ main() {
   cp /home/frappe/frappe-bench/config/supervisor.conf /etc/supervisor/conf.d/frappe.conf
   # supervisor does not run while the image is built (it needs the data disk), so there is nothing
   # to reread. It reads conf.d/frappe.conf when it first starts on the initialized appliance.
+
+  # The mount point that init-data.sh and every later boot mount onto. It belongs to the system
+  # image, because the data disk holds only data: nothing creates /data at first mount, and the
+  # first real Initialize failed with "mount point does not exist".
+  install -d -m 0755 /data
   systemctl daemon-reload
   systemctl disable mariadb.service supervisor.service
 
