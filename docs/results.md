@@ -183,13 +183,32 @@ So nothing in the shipped image depends on the `/srv` mount, the `insteadOf` rew
 
 ### Second run downloads nothing (engine level, 2026-11-21)
 
-With the populated proof cache and an HTTP handler that fails on every request, `DownloadEngine` made **0 requests** and reported every part `alreadyPresent` (6 parts, 1,373 files, 15 s to verify hashes). Scope: the six parts the engine downloads (`database`, `system-tools`, `language-tools`, `web-tools`, `framework`, `erpnext`). The `engine` (QEMU) and `os` (Debian base image) parts go through the installer and `BaseImageDownloader`, so this run does not show they hit the cache. The file counts it reported (language-tools 179, framework 4) differ from the generator README table (178 and 3); that is unresolved.
+With the populated proof cache and an HTTP handler that fails on every request, `DownloadEngine` made **0 requests** and reported every part `alreadyPresent` (6 parts, 1,375 files, 15 s to verify hashes). Scope: the six parts the engine downloads (`database`, `system-tools`, `language-tools`, `web-tools`, `framework`, `erpnext`). The `engine` (QEMU) part goes through the installer, so this run does not show it hits the cache. A later setup run on the same cache (below) started at the Build step with 1,374 cache entries and made no downloads, which covers `os` as well.
+
+### Cold-cache guided setup (2026-11-21, this PC, headless harness)
+
+`ApplianceService.RunSetupAsync` against an empty app-data root, real downloads, `restrict=on` build. The harness has no PC probe, so the **PC check and Prepare steps did not run**: QEMU was copied in beforehand and the QEMU installer (197 MB) was not downloaded. Connection: about 2.5 MB/s measured here (1,102 MB in 7 min 19 s).
+
+| Step | Time | Notes |
+|---|---|---|
+| Download (six parts + Debian image, 1,102 MB) | 7 min 19 s | Cold cache, successful download. An earlier attempt failed at the `os` size check after 776 MB; see defect 1 |
+| Build (offline, `restrict=on`) | 219 s | Version gate passed: Python 3.14.7, Node 24.2.0, MariaDB 11.8.3, Redis 8.0.2 |
+| Company data (Initialize, new site) | 110 s | |
+| Start (health gate) | 32 s | Running at `http://127.0.0.1:18181` |
+| **Measured total** | **about 14 min** | 7 min 19 s download + 6 min 4 s for the other steps |
+
+The download and the other steps came from two runs, because the first one failed at Build (below), so the 14 minutes is the sum of both and not one continuous run. Not measured: the PC check, Prepare (QEMU installer download and install, Windows feature turn-on and restart), and slower connections. The download scales with the link: at 1 MB/s it would be about 18 min for 1.1 GB, plus the 197 MB installer. The Welcome screen therefore keeps "about 1 hour"; changing it needs a decision on how to word a figure that depends on the connection.
+
+**Defects the cold run found:**
+
+1. **Wrong sizes in `config/build-inputs.json` (fixed).** The `os` entry said 357,564,416 bytes; the real Debian image is 341,049,344. The `engine` entry said 188,743,680; the real installer is 206,615,928 (SHA-256 verified against the pin). The size check runs before the hash check, so the first run failed with "Second checksum mismatch ... os" and discarded a good file. Earlier runs never saw it because they used a cache filled by another path. A first-time user would have failed at Download. The generator script and the README table carried the same wrong numbers and are corrected; the README counts were also stale (language-tools 179, framework 4, 1,375 files, 1,299 MB).
+2. **Misleading error when the ERPNext port is taken (not fixed).** The build VM forwards `127.0.0.1:<port>`; when another QEMU held the port, QEMU exited with code 1 and the failure read "Could not connect to the guest console ... GuestConsoleClosed", with the real cause only in the log. The port was held by an appliance left running by an earlier test of mine, not by the product, but a user with a busy port 18080 would see the same message.
 
 ### Pending: needs a person or a longer run
 
 | Item | Why it is not done |
 |---|---|
-| Generator output diffed against the committed `config/build-inputs.json` | `eng/lock/generate-build-inputs.sh` does not run on a stock `debian:trixie` image on this PC: the image carries packages newer than the 2026-08-22 snapshot, so the pinned `-dev` installs fail on exact-version dependencies. Four attempts (downgrade flags, pin priorities, clean distros) ended in a different dependency conflict each time (the last: `python3.14` needs `libc6 >= 2.42`). The committed list is verified by the offline build, not by regeneration; regenerating may not reproduce it. Next step is the `generate-build-inputs.yml` workflow in CI. |
-| Timed cold-cache Welcome-to-Ready run | Needs a real 1.3 GB download plus the full guided setup. The Welcome screen keeps "about 1 hour" until this is measured. |
+| Generator output diffed against the committed `config/build-inputs.json` | `eng/lock/generate-build-inputs.sh` does not run on a stock `debian:trixie` image on this PC: the image carries packages newer than the 2026-08-22 snapshot, so the pinned `-dev` installs fail on exact-version dependencies. Four attempts (downgrade flags, pin priorities, clean distros) ended in a different dependency conflict each time (the last: `python3.14` needs `libc6 >= 2.42`). The committed list is verified by the offline build and the cold run, not by regeneration; regenerating may not reproduce it. Next step is the `generate-build-inputs.yml` workflow in CI. |
+| Cold run through the PC check and Prepare | The harness skips both. Needs the GUI path or a Windows probe wired into the harness, and it installs QEMU and may turn on Windows features. |
 | Clean install from the MSI to the sign-in page | Needs the reference PC and a Windows elevation prompt. |
 | Observed first-time user install | Needs a person who has installed Office and never used Serpy. |

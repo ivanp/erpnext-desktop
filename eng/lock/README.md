@@ -54,13 +54,13 @@ The full input manifest `config/build-inputs.json` is generated reproducibly by 
 |---|---|---|---|---|
 | `engine` | Serpy engine | 1 | 188 MB | `qemu.weilnetz.de` |
 | `os` | Operating system for ERPNext | 1 | 357 MB | `cloud.debian.org` |
-| `database` | Database | 12 | 28 MB | `archive.mariadb.org` |
-| `system-tools` | System tools | 224 | 162 MB | `deb.debian.org`, `snapshot.debian.org` |
-| `language-tools` | Language tools | 178 | 252 MB | `files.pythonhosted.org`, `nodejs.org`, `registry.yarnpkg.com`, `snapshot.debian.org` |
-| `web-tools` | Web tools | 953 | 321 MB | `registry.yarnpkg.com` |
-| `framework` | ERPNext framework | 3 | 25 MB | `github.com` |
+| `database` | Database | 12 | 27 MB | `archive.mariadb.org` |
+| `system-tools` | System tools | 224 | 155 MB | `deb.debian.org`, `snapshot.debian.org` |
+| `language-tools` | Language tools | 179 | 241 MB | `files.pythonhosted.org`, `nodejs.org`, `registry.yarnpkg.com`, `snapshot.debian.org` |
+| `web-tools` | Web tools | 953 | 307 MB | `registry.yarnpkg.com` |
+| `framework` | ERPNext framework | 4 | 24 MB | `github.com` |
 | `erpnext` | ERPNext | 1 | 24 MB | `github.com` |
-| **Total** | | **1,373** | **~1.3 GB** | |
+| **Total** | | **1,375** | **~1.3 GB (1,299 MB)** | |
 
 ### Running the Generator Locally
 
