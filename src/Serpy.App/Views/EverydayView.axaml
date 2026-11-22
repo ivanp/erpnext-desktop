@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Serpy.App.ViewModels"
+             xmlns:ui="using:Serpy.App.Text"
              x:Class="Serpy.App.Views.EverydayView"
              x:DataType="vm:DashboardViewModel">
   <ScrollViewer>
@@ -22,6 +23,8 @@
                 VerticalAlignment="Center"
                 Classes="badge"
                 Classes.ok="{Binding IsHealthy}"
+                Classes.warn="{Binding IsStartingOrUnhealthy}"
+                Classes.bad="{Binding IsCrashed}"
                 Classes.stopped="{Binding !IsHealthy}">
           <Border.Styles>
             <Style Selector="Border.badge">
@@ -41,6 +44,24 @@
             </Style>
             <Style Selector="Border.badge.ok Border#LedDot">
               <Setter Property="Background" Value="#2E9E5B" />
+            </Style>
+            <Style Selector="Border.badge.warn">
+              <Setter Property="Background" Value="#FDF5E4" />
+            </Style>
+            <Style Selector="Border.badge.warn TextBlock#StatusBadgeText">
+              <Setter Property="Foreground" Value="#6F4A0C" />
+            </Style>
+            <Style Selector="Border.badge.warn Border#LedDot">
+              <Setter Property="Background" Value="#C98A1B" />
+            </Style>
+            <Style Selector="Border.badge.bad">
+              <Setter Property="Background" Value="#FBECEA" />
+            </Style>
+            <Style Selector="Border.badge.bad TextBlock#StatusBadgeText">
+              <Setter Property="Foreground" Value="#7F2419" />
+            </Style>
+            <Style Selector="Border.badge.bad Border#LedDot">
+              <Setter Property="Background" Value="#C2402F" />
             </Style>
           </Border.Styles>
           <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -154,12 +175,12 @@
 
             <!-- Key-value facts when running -->
             <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,2,0,4">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="Address" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
-              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AddressDisplayText}" Margin="0,2" FontSize="12.5" />
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="Sign-in" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
-              <TextBlock Grid.Row="1" Grid.Column="1" Text="Administrator · password saved on this PC" Margin="0,2" FontSize="12.5" />
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="Data folder" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
-              <TextBlock Grid.Row="2" Grid.Column="1" Text="%LOCALAPPDATA%\Serpy" Margin="0,2" FontSize="12.5" />
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="{x:Static ui:UiText.AddressLabel}" Classes="muted" Margin="0,2,14,2" FontSize="12.5" IsVisible="{Binding HasAddress}" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AddressDisplayText}" Margin="0,2" FontSize="12.5" IsVisible="{Binding HasAddress}" />
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="{x:Static ui:UiText.SignInLabel}" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="{x:Static ui:UiText.EverydaySignInHint}" Margin="0,2" FontSize="12.5" />
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="{x:Static ui:UiText.DataFolderLabel}" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DataFolderText}" Margin="0,2" FontSize="12.5" />
             </Grid>
 
             <!-- Terminal log viewer -->

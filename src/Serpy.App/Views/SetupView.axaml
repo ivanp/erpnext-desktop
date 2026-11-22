@@ -17,6 +17,7 @@
     <ScrollViewer IsVisible="{Binding ShowWelcome}">
       <StackPanel Name="WelcomeScreen"
                   AutomationProperties.AutomationId="WelcomeScreen"
+                  IsVisible="{Binding ShowWelcome}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <TextBlock Classes="h1" Text="{x:Static ui:UiText.WelcomeTitle}" />
@@ -71,6 +72,7 @@
     <ScrollViewer IsVisible="{Binding ShowChecking}">
       <StackPanel Name="CheckingScreen"
                   AutomationProperties.AutomationId="CheckingScreen"
+                  IsVisible="{Binding ShowChecking}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <views:Strip />
@@ -92,6 +94,7 @@
     <ScrollViewer IsVisible="{Binding ShowCannotRun}">
       <StackPanel Name="CannotRunScreen"
                   AutomationProperties.AutomationId="CannotRunScreen"
+                  IsVisible="{Binding ShowCannotRun}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <!-- Error banner matching mockup .banner -->
@@ -139,6 +142,7 @@
     <ScrollViewer IsVisible="{Binding ShowRestartNeeded}">
       <StackPanel Name="RestartScreen"
                   AutomationProperties.AutomationId="RestartScreen"
+                  IsVisible="{Binding ShowRestartNeeded}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <views:Strip />
@@ -171,6 +175,7 @@
     <ScrollViewer IsVisible="{Binding ShowPasswordNeeded}">
       <StackPanel Name="PasswordScreen"
                   AutomationProperties.AutomationId="PasswordScreen"
+                  IsVisible="{Binding ShowPasswordNeeded}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <TextBlock Classes="h1" Text="{x:Static ui:UiText.PasswordTitle}" />
@@ -213,6 +218,7 @@
     <ScrollViewer IsVisible="{Binding ShowDownloads}">
       <StackPanel Name="DownloadsScreen"
                   AutomationProperties.AutomationId="DownloadsScreen"
+                  IsVisible="{Binding ShowDownloads}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <views:Strip />
@@ -253,6 +259,7 @@
     <ScrollViewer IsVisible="{Binding ShowInstalling}">
       <StackPanel Name="InstallingScreen"
                   AutomationProperties.AutomationId="InstallingScreen"
+                  IsVisible="{Binding ShowInstalling}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <views:Strip />
@@ -335,6 +342,7 @@
     <ScrollViewer IsVisible="{Binding ShowReady}">
       <StackPanel Name="ReadyScreen"
                   AutomationProperties.AutomationId="ReadyScreen"
+                  IsVisible="{Binding ShowReady}"
                   Margin="22,10,22,10"
                   Spacing="6"
                   HorizontalAlignment="Center">
@@ -387,6 +395,7 @@
     <ScrollViewer IsVisible="{Binding ShowProblem}">
       <StackPanel Name="ProblemScreen"
                   AutomationProperties.AutomationId="ProblemScreen"
+                  IsVisible="{Binding ShowProblem}"
                   Margin="22,18,22,20"
                   Spacing="12">
         <views:Strip />

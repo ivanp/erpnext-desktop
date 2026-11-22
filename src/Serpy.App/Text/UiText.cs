@@ -264,7 +264,7 @@ public static class UiText
             "save the details and send them to the person who helps you with Serpy."),
         [FailureCode.PortInUse] = F("Another program is using the web address ERPNext needs",
             "Setup stopped before starting the installation.",
-            "close the other program or change the address in settings, then try again."),
+            "close the other program, then try again."),
         [FailureCode.Cancelled] = F("Setup was cancelled",
             "Nothing is lost. Setup continues where it stopped.", "start setup again when you are ready."),
         [FailureCode.Unknown] = F("Something went wrong", "Setup stopped.", AskForHelp),
@@ -281,7 +281,19 @@ public static class UiText
     public static readonly string ErpNextIsReady = Plain("ERPNext is ready");
     public static readonly string StopErpNext = Plain("Stop ERPNext");
     public static readonly string StartErpNext = Plain("Start ERPNext");
+    public static readonly string StartingUpErpNext = Plain("Starting up ERPNext…");
+    public static readonly string ErpNextStoppedUnexpectedly = Plain("ERPNext stopped unexpectedly");
+    public static readonly string StartingErpNext = Plain("Starting ERPNext…");
+    public static readonly string NotSetUp = Plain("Not set up");
+    public static readonly string SetupIncomplete = Plain("Setup incomplete");
+    public static readonly string Stopped = Plain("Stopped");
 
+    // EverydayView labels
+    public static readonly string AddressLabel = Plain("Address");
+    public static readonly string SignInLabel = Plain("Sign-in");
+    public static readonly string DataFolderLabel = Plain("Data folder");
+    public static readonly string EverydaySignInHint = Plain("Administrator · password saved on this PC");
+    public static readonly string WorksOnlyOnThisPc = Plain("works only on this PC");
     // The tray tooltip says the state in words (R34). Each one is a whole sentence, so it needs no join.
     public static readonly string TraySettingUp = Plain("Serpy: setting up");
     public static readonly string TrayStarting = Plain("Serpy: starting ERPNext");

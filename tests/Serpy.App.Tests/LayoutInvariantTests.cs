@@ -9,6 +9,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Avalonia.LogicalTree;
 using Serpy.App.ViewModels;
 using Serpy.App.Views;
 using Serpy.Core.Contracts;
@@ -33,11 +34,52 @@ public sealed class LayoutInvariantTests
         Guid.NewGuid(), run, steps ?? (current.HasValue ? [new SetupStepStatus(current.Value, SetupStepState.Working)] : []), current, percent, activity,
         elapsed ?? TimeSpan.FromMinutes(12), stuck, failure, DownloadParts: downloadParts);
 
-    private static T? FindByAutomationId<T>(Visual root, string automationId) where T : Visual =>
-        root.GetVisualDescendants()
-            .OfType<T>()
-            .FirstOrDefault(v => AutomationProperties.GetAutomationId(v) == automationId);
+    private static readonly string[] AllScreenRootIds =
+    [
+        "WelcomeScreen",
+        "CheckingScreen",
+        "CannotRunScreen",
+        "RestartScreen",
+        "PasswordScreen",
+        "DownloadsScreen",
+        "InstallingScreen",
+        "ReadyScreen",
+        "ProblemScreen",
+    ];
 
+    private static T? FindByAutomationId<T>(Visual root, string automationId) where T : Visual
+    {
+        var visual = root.GetVisualDescendants()
+            .OfType<T>()
+            .FirstOrDefault(v => AutomationProperties.GetAutomationId(v) == automationId || (v is Control c && c.Name == automationId));
+        if (visual is not null) return visual;
+
+        if (root is ILogical logicalRoot)
+        {
+            return logicalRoot.GetLogicalDescendants()
+                .OfType<T>()
+                .FirstOrDefault(v => AutomationProperties.GetAutomationId(v) == automationId || (v is Control c && c.Name == automationId));
+        }
+
+        return null;
+    }
+    private static void AssertOnlyActiveScreenIsVisible(Window win, string activeScreenId)
+    {
+        foreach (var id in AllScreenRootIds)
+        {
+            var screen = FindByAutomationId<StackPanel>(win, id);
+            Assert.NotNull(screen);
+            if (id == activeScreenId)
+            {
+                Assert.True(screen.IsEffectivelyVisible, $"Expected screen '{id}' to be effectively visible.");
+                Assert.True(screen.Bounds.Width <= win.ClientSize.Width, $"Screen '{id}' width ({screen.Bounds.Width}) exceeds window ClientSize.Width ({win.ClientSize.Width}).");
+            }
+            else
+            {
+                Assert.False(screen.IsEffectivelyVisible, $"Expected screen '{id}' to NOT be effectively visible.");
+            }
+        }
+    }
     [AvaloniaFact]
     public void DashboardWindow_DefaultDimensions_MatchMockup()
     {
@@ -58,13 +100,28 @@ public sealed class LayoutInvariantTests
 
         var welcome = FindByAutomationId<StackPanel>(win, "WelcomeScreen");
         Assert.NotNull(welcome);
-        Assert.True(welcome.IsVisible);
+        AssertOnlyActiveScreenIsVisible(win, "WelcomeScreen");
+
+        // Facts items do not intersect each other
+        var factItems = welcome.GetVisualDescendants()
+            .OfType<ContentPresenter>()
+            .Where(cp => cp.GetVisualDescendants().OfType<TextBlock>().Any(tb => tb.Classes.Contains("fact")))
+            .ToArray();
+        for (var i = 0; i < factItems.Length; i++)
+        {
+            var boundsA = factItems[i].Bounds;
+            for (var j = i + 1; j < factItems.Length; j++)
+            {
+                var boundsB = factItems[j].Bounds;
+                Assert.False(boundsA.Intersects(boundsB), $"Fact item {i} ({boundsA}) intersects item {j} ({boundsB}).");
+            }
+        }
 
         var startBtn = FindByAutomationId<Button>(win, "StartSetupButton");
         Assert.NotNull(startBtn);
-        Assert.True(startBtn.IsVisible);
-        Assert.True(startBtn.Bounds.Right <= win.Bounds.Width);
-
+        Assert.True(startBtn.IsEffectivelyVisible);
+        Assert.True(startBtn.Bounds.Right <= win.ClientSize.Width, $"Start button right ({startBtn.Bounds.Right}) > window ClientSize.Width ({win.ClientSize.Width})");
+        Assert.True(startBtn.Bounds.Bottom <= win.ClientSize.Height, $"Start button bottom ({startBtn.Bounds.Bottom}) > window ClientSize.Height ({win.ClientSize.Height})");
         var check = FindByAutomationId<CheckBox>(win, "WelcomeStartAtSignInCheck");
         Assert.NotNull(check);
         Assert.True(check.IsVisible);
@@ -89,8 +146,13 @@ public sealed class LayoutInvariantTests
 
         var checking = FindByAutomationId<StackPanel>(win, "CheckingScreen");
         Assert.NotNull(checking);
-        Assert.True(checking.IsVisible);
-
+        AssertOnlyActiveScreenIsVisible(win, "CheckingScreen");
+        var checkAgainBtn = FindByAutomationId<Button>(win, "CheckAgainButton");
+        if (checkAgainBtn is { IsEffectivelyVisible: true })
+        {
+            Assert.True(checkAgainBtn.Bounds.Right <= win.ClientSize.Width);
+            Assert.True(checkAgainBtn.Bounds.Bottom <= win.ClientSize.Height);
+        }
         var stepper = FindByAutomationId<ItemsControl>(win, "StepperList");
         Assert.NotNull(stepper);
         Assert.True(stepper.IsVisible);
@@ -131,9 +193,10 @@ public sealed class LayoutInvariantTests
         var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
+        AssertOnlyActiveScreenIsVisible(win, "CannotRunScreen");
         var cannotRun = FindByAutomationId<TextBlock>(win, "CannotRunWhatToDoText");
         Assert.NotNull(cannotRun);
-        Assert.True(cannotRun.Inlines?.Count > 0);
+        Assert.NotNull(cannotRun.Inlines);
         Assert.Contains(cannotRun.Inlines!, inline => inline.FontWeight == FontWeight.Bold);
 
         win.Close();
@@ -157,11 +220,13 @@ public sealed class LayoutInvariantTests
 
         var ready = FindByAutomationId<StackPanel>(win, "ReadyScreen");
         Assert.NotNull(ready);
-        Assert.True(ready.IsVisible);
+        AssertOnlyActiveScreenIsVisible(win, "ReadyScreen");
 
         var openBtn = FindByAutomationId<Button>(win, "OpenErpNextButton");
         Assert.NotNull(openBtn);
-        Assert.True(openBtn.IsVisible);
+        Assert.True(openBtn.IsEffectivelyVisible);
+        Assert.True(openBtn.Bounds.Right <= win.ClientSize.Width, $"OpenErpNext button right ({openBtn.Bounds.Right}) > window ClientSize.Width ({win.ClientSize.Width})");
+        Assert.True(openBtn.Bounds.Bottom <= win.ClientSize.Height, $"OpenErpNext button bottom ({openBtn.Bounds.Bottom}) > window ClientSize.Height ({win.ClientSize.Height})");
 
         win.Close();
     }
@@ -177,6 +242,7 @@ public sealed class LayoutInvariantTests
 
         var restartScreen = FindByAutomationId<StackPanel>(win, "RestartScreen");
         Assert.NotNull(restartScreen);
+        AssertOnlyActiveScreenIsVisible(win, "RestartScreen");
         var textBlocks = restartScreen.GetVisualDescendants().OfType<TextBlock>().ToArray();
         var adviceBlock = Assert.Single(textBlocks, tb => tb.Classes.Contains("hint"));
         Assert.True(adviceBlock.Inlines?.Count > 0);
@@ -199,16 +265,19 @@ public sealed class LayoutInvariantTests
 
         var problem = FindByAutomationId<StackPanel>(win, "ProblemScreen");
         Assert.NotNull(problem);
-        Assert.True(problem.IsVisible);
+        AssertOnlyActiveScreenIsVisible(win, "ProblemScreen");
 
         var tryAgain = FindByAutomationId<Button>(win, "TryAgainButton");
         Assert.NotNull(tryAgain);
-        Assert.True(tryAgain.IsVisible);
+        Assert.True(tryAgain.IsEffectivelyVisible);
+        Assert.True(tryAgain.Bounds.Right <= win.ClientSize.Width, $"TryAgain button right ({tryAgain.Bounds.Right}) > window ClientSize.Width ({win.ClientSize.Width})");
+        Assert.True(tryAgain.Bounds.Bottom <= win.ClientSize.Height, $"TryAgain button bottom ({tryAgain.Bounds.Bottom}) > window ClientSize.Height ({win.ClientSize.Height})");
 
         var saveDetails = FindByAutomationId<Button>(win, "SaveDetailsButton");
         Assert.NotNull(saveDetails);
-        Assert.True(saveDetails.IsVisible);
-
+        Assert.True(saveDetails.IsEffectivelyVisible);
+        Assert.True(saveDetails.Bounds.Right <= win.ClientSize.Width, $"SaveDetails button right ({saveDetails.Bounds.Right}) > window ClientSize.Width ({win.ClientSize.Width})");
+        Assert.True(saveDetails.Bounds.Bottom <= win.ClientSize.Height, $"SaveDetails button bottom ({saveDetails.Bounds.Bottom}) > window ClientSize.Height ({win.ClientSize.Height})");
         var whatToDo = FindByAutomationId<TextBlock>(win, "FailureWhatToDoText");
         Assert.NotNull(whatToDo);
         Assert.True(whatToDo.Inlines?.Count > 0);

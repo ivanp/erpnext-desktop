@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:Serpy.App.ViewModels"
+             xmlns:ui="using:Serpy.App.Text"
              mc:Ignorable="d"
              d:DesignWidth="560"
              d:DesignHeight="320"
@@ -19,7 +20,7 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
           <Button Classes="sm"
                   Command="{Binding SaveDetailsCommand}"
-                  Content="Save details…" />
+                  Content="{x:Static ui:UiText.SaveDetails}" />
         </StackPanel>
 
         <!-- Dark terminal log box matching mockup .log -->

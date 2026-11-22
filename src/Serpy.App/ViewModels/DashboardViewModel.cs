@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Serpy.App.Text;
 using Serpy.Core.Contracts;
+using Serpy.Core.Configuration;
 
 namespace Serpy.App.ViewModels;
 
@@ -31,7 +32,8 @@ public sealed partial class DashboardViewModel : ObservableObject
         nameof(CanStart), nameof(CanRestart), nameof(CanStop), nameof(IsHealthy),
         nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(CanExecutePrimaryAction),
         nameof(StartOrStopButtonLabel), nameof(CanStartOrStop), nameof(CanOpenErpNext),
-        nameof(SubtitleText), nameof(AddressDisplayText))]
+        nameof(SubtitleText), nameof(AddressDisplayText), nameof(HasAddress),
+        nameof(IsStartingOrUnhealthy), nameof(IsCrashed))]
     private ApplianceStatus _status = new(
         ReadinessState.NotBuilt, HealthState.Stopped,
         null, null, null, null);
@@ -81,6 +83,8 @@ public sealed partial class DashboardViewModel : ObservableObject
         Status.Health is HealthState.Running or HealthState.RunningUnhealthy;
 
     public bool IsHealthy => Status.Health == HealthState.Running;
+    public bool IsStartingOrUnhealthy => Status.Health is HealthState.Starting or HealthState.RunningUnhealthy;
+    public bool IsCrashed => Status.Health == HealthState.Crashed;
 
     public string DetailsHeaderText => ShowDetails ? "Hide details" : "Show details";
 
@@ -98,9 +102,13 @@ public sealed partial class DashboardViewModel : ObservableObject
         },
     };
 
-    public string AddressDisplayText => !string.IsNullOrWhiteSpace(Status.LoopbackUrl)
-        ? $"{Status.LoopbackUrl} · works only on this PC"
-        : "http://127.0.0.1:18080 · works only on this PC";
+    public bool HasAddress => !string.IsNullOrWhiteSpace(Status.LoopbackUrl);
+
+    public string AddressDisplayText => HasAddress
+        ? $"{Status.LoopbackUrl} · {UiText.WorksOnlyOnThisPc}"
+        : string.Empty;
+
+    public string DataFolderText => KnownPaths.AppDataRoot;
 
     public bool CanOpenErpNext => Status.Health == HealthState.Running || Status.PasswordRejected;
 
@@ -129,16 +137,16 @@ public sealed partial class DashboardViewModel : ObservableObject
         }
         : Status.Health switch
         {
-            HealthState.Running          => "Ready — ERPNext is open",
-            HealthState.RunningUnhealthy => "Starting up ERPNext…",
-            HealthState.Crashed          => "Appliance stopped unexpectedly",
-            HealthState.Starting         => "Starting appliance…",
+            HealthState.Running          => UiText.ErpNextIsReady,
+            HealthState.RunningUnhealthy => UiText.StartingUpErpNext,
+            HealthState.Crashed          => UiText.ErpNextStoppedUnexpectedly,
+            HealthState.Starting         => UiText.StartingErpNext,
             _ => Status.Readiness switch
             {
-                ReadinessState.NotBuilt     => "Not set up",
-                ReadinessState.Built        => "Setup incomplete",
-                ReadinessState.Initialized  => "Stopped",
-                _                           => "Stopped",
+                ReadinessState.NotBuilt     => UiText.NotSetUp,
+                ReadinessState.Built        => UiText.SetupIncomplete,
+                ReadinessState.Initialized  => UiText.Stopped,
+                _                           => UiText.Stopped,
             },
         };
 
