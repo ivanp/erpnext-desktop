@@ -9,7 +9,6 @@ public sealed class TestAppBuilder
 {
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<Serpy.App.App>()
-            .UseSkia()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions())
             .WithInterFont();
 }
