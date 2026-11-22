@@ -19,9 +19,10 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 498 | Pass — 2026-11-21 |
-| `Serpy.App.Tests` | 153 | Pass — 2026-11-21 |
-| `Serpy.InstallerBootstrapper.Tests` | 20 | Pass — 2026-11-21 |
+| `Serpy.Core.Tests` | 509 | Pass — 2026-11-22 |
+| `Serpy.App.Tests` | 165 | Pass — 2026-11-22 |
+| `Serpy.InstallerBootstrapper.Tests` | 20 | Pass — 2026-11-22 |
+| `Serpy.Windows.UiTests` (`DashboardComponentTests`, `SetupComponentTests`) | 2 classes | Fail — 2026-11-22 (run before `ea0c895`): tests predate U10 layout/routing (`BuildButton`/`InitializeButton` inside collapsed `DetailsExpander`; clean launch opens `EverydayView` instead of `WelcomeScreen`) |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | Windows appliance integration | AE3, AE5 clean run | Pass — 2026-11-21: Clean Build → Initialize → AE3 (persistence across clean restart) → AE5 (durability after unclean QEMU kill). |
