@@ -5,8 +5,11 @@
         x:Class="Serpy.App.Views.DashboardWindow"
         x:DataType="vm:DashboardViewModel"
         Title="Serpy"
-        Width="520" Height="460"
-        MinWidth="420" MinHeight="360"
+        Width="540" Height="480"
+        MinWidth="460" MinHeight="400"
+        Background="{StaticResource PanelBrush}"
+        Foreground="{StaticResource InkBrush}"
+        FontFamily="Segoe UI, -apple-system, system-ui, sans-serif"
         WindowStartupLocation="CenterScreen">
 
   <Panel>

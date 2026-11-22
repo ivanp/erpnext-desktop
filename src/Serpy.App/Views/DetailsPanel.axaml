@@ -8,27 +8,43 @@
              d:DesignHeight="320"
              x:Class="Serpy.App.Views.DetailsPanel"
              x:DataType="vm:SetupViewModel">
-  <Expander Name="DetailsExpander"
-            AutomationProperties.AutomationId="DetailsExpander"
-            Header="{Binding DetailsHeaderText}"
-            IsExpanded="{Binding DetailsVisible, Mode=TwoWay}">
-    <Panel MinHeight="120">
-      <TextBlock Name="DetailsPlaceholderText"
-                 Classes="muted"
-                 IsVisible="{Binding DetailLogPlaceholderVisible}"
-                 Text="{Binding DetailLogPlaceholder}"
-                 TextWrapping="Wrap" />
-      <ScrollViewer MaxHeight="260"
-                    HorizontalScrollBarVisibility="Disabled"
-                    VerticalScrollBarVisibility="Auto">
-        <TextBlock Name="DetailLogText"
-                   AutomationProperties.AutomationId="DetailLogText"
-                   FontFamily="Cascadia Code,Consolas,monospace"
-                   FontSize="11"
-                   IsVisible="{Binding DetailLogFilled}"
-                   Text="{Binding DetailLogText}"
-                   TextWrapping="Wrap" />
-      </ScrollViewer>
-    </Panel>
-  </Expander>
+  <Border BorderThickness="0,1,0,0" BorderBrush="#E3E6EA" Margin="0,16,0,0" Padding="0,6,0,0">
+    <Expander Name="DetailsExpander"
+              AutomationProperties.AutomationId="DetailsExpander"
+              Header="{Binding DetailsHeaderText}"
+              IsExpanded="{Binding DetailsVisible, Mode=TwoWay}">
+      <StackPanel Spacing="8" Margin="0,6,0,0">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+          <Button Classes="sm"
+                  Command="{Binding SaveDetailsCommand}"
+                  Content="Save details…" />
+        </StackPanel>
+
+        <!-- Dark terminal log box matching mockup .log -->
+        <Border Background="#10151B" CornerRadius="8" Padding="12,10" MinHeight="100">
+          <Panel>
+            <TextBlock Name="DetailsPlaceholderText"
+                       Foreground="#7C8794"
+                       FontFamily="Cascadia Code,Consolas,monospace"
+                       FontSize="11.5"
+                       IsVisible="{Binding DetailLogPlaceholderVisible}"
+                       Text="{Binding DetailLogPlaceholder}"
+                       TextWrapping="Wrap" />
+            <ScrollViewer MaxHeight="220"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+              <TextBlock Name="DetailLogText"
+                         AutomationProperties.AutomationId="DetailLogText"
+                         FontFamily="Cascadia Code,Consolas,monospace"
+                         FontSize="11.5"
+                         Foreground="#CBD5E1"
+                         IsVisible="{Binding DetailLogFilled}"
+                         Text="{Binding DetailLogText}"
+                         TextWrapping="Wrap" />
+            </ScrollViewer>
+          </Panel>
+        </Border>
+      </StackPanel>
+    </Expander>
+  </Border>
 </UserControl>

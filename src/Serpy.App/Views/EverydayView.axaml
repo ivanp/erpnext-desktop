@@ -3,100 +3,169 @@
              xmlns:vm="using:Serpy.App.ViewModels"
              x:Class="Serpy.App.Views.EverydayView"
              x:DataType="vm:DashboardViewModel">
-  <DockPanel Margin="20">
-    <Panel Name="DashboardPanel">
+  <ScrollViewer>
+    <StackPanel Name="DashboardPanel" Margin="22,18,22,20" Spacing="14">
 
-      <!-- Header: brand + status badge -->
-      <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,14">
-        <TextBlock Text="Serpy" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
-        <Border Background="#EEF1F4" CornerRadius="12" Padding="10,5">
-          <TextBlock AutomationProperties.AutomationId="StatusBadge" Text="{Binding StatusBadgeText}" FontSize="13" FontWeight="SemiBold"/>
+      <!-- Hero: Brand logo + status badge + loopback URL -->
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+        <!-- Serpy mark + title -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Border Width="22" Height="22" CornerRadius="6" Background="{StaticResource BrandBrush}">
+            <TextBlock Text="S" Foreground="#FFFFFF" FontSize="12" FontWeight="ExtraBold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="Serpy" FontSize="16" FontWeight="Bold" Foreground="{StaticResource BrandInkBrush}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Status badge pill matching mockup .badge -->
+        <Border Grid.Column="1" Margin="14,0,0,0" CornerRadius="999" Padding="12,5"
+                VerticalAlignment="Center"
+                Classes.ok="{Binding IsHealthy}"
+                Classes.stopped="{Binding !IsHealthy}"
+                Background="#EEF1F4">
+          <Border.Styles>
+            <Style Selector="Border.ok">
+              <Setter Property="Background" Value="#E7F6EC" />
+            </Style>
+            <Style Selector="Border.ok TextBlock#StatusBadgeText">
+              <Setter Property="Foreground" Value="#1C6B3A" />
+            </Style>
+            <Style Selector="Border.ok Border#LedDot">
+              <Setter Property="Background" Value="#2E9E5B" />
+            </Style>
+          </Border.Styles>
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Border Name="LedDot" Width="10" Height="10" CornerRadius="5" Background="#9AA3AD" VerticalAlignment="Center" />
+            <TextBlock Name="StatusBadgeText"
+                       AutomationProperties.AutomationId="StatusBadge"
+                       Text="{Binding StatusBadgeText}"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Foreground="#6B7280"
+                       VerticalAlignment="Center" />
+          </StackPanel>
         </Border>
+
         <!-- Loopback URL when healthy -->
-        <TextBlock AutomationProperties.AutomationId="LoopbackUrlText"
+        <TextBlock Grid.Column="3"
+                   AutomationProperties.AutomationId="LoopbackUrlText"
                    Text="{Binding Status.LoopbackUrl}"
-                   FontSize="12" Foreground="#2563EB"
+                   FontSize="12.5"
+                   Foreground="{StaticResource AccentBrush}"
                    VerticalAlignment="Center"
-                   IsVisible="{Binding IsHealthy}"/>
+                   IsVisible="{Binding IsHealthy}" />
+      </Grid>
+
+      <!-- Subtitle description -->
+      <TextBlock Classes="sub" Text="ERPNext is running on this PC. It opens in your web browser." Margin="0,0,0,2" />
+
+      <!-- Operation stage text and progress bar -->
+      <StackPanel Spacing="6" IsVisible="{Binding IsOperationRunning}">
+        <TextBlock AutomationProperties.AutomationId="StageText"
+                   Text="{Binding StageText}"
+                   FontSize="13"
+                   Foreground="{StaticResource MutedBrush}" />
+        <ProgressBar AutomationProperties.AutomationId="ProgressBar"
+                     Value="{Binding ProgressPercent}"
+                     Maximum="100"
+                     Height="8"
+                     CornerRadius="4" />
       </StackPanel>
 
-      <!-- Stage text + progress -->
-      <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,14">
-        <TextBlock AutomationProperties.AutomationId="StageText" Text="{Binding StageText}" FontSize="13" Foreground="#6B7280"/>
-        <ProgressBar AutomationProperties.AutomationId="ProgressBar" Value="{Binding ProgressPercent}" Maximum="100" Height="8" CornerRadius="4"/>
-      </StackPanel>
+      <!-- Primary action row: Open ERPNext, Start or Stop, Cancel -->
+      <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,2,0,0">
+        <Button AutomationProperties.AutomationId="PrimaryActionButton"
+                Content="{Binding PrimaryActionLabel}"
+                Command="{Binding PrimaryActionCommand}"
+                IsEnabled="{Binding CanExecutePrimaryAction}"
+                Classes="primary"
+                IsVisible="{Binding CanBuild}" />
 
-      <!-- Primary action row: Open ERPNext, Start or Stop -->
-      <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
         <Button AutomationProperties.AutomationId="OpenErpNextButton"
                 Content="Open ERPNext"
                 Command="{Binding OpenErpNextCommand}"
                 IsEnabled="{Binding CanOpenErpNext}"
-                Classes="accent"/>
+                Classes="primary"
+                IsVisible="{Binding !CanBuild}" />
 
         <Button AutomationProperties.AutomationId="StartOrStopButton"
                 Content="{Binding StartOrStopButtonLabel}"
                 Command="{Binding StartOrStopCommand}"
-                IsEnabled="{Binding CanStartOrStop}"/>
+                IsEnabled="{Binding CanStartOrStop}" />
 
-        <!-- Cancel in-flight operation -->
         <Button AutomationProperties.AutomationId="CancelButton"
                 Content="✕"
                 Command="{Binding CancelCommand}"
                 IsEnabled="{Binding IsOperationRunning}"
-                ToolTip.Tip="Cancel current operation"/>
+                ToolTip.Tip="Cancel current operation"
+                Classes="sm" />
       </StackPanel>
 
+      <!-- Autostart CheckBox -->
       <CheckBox AutomationProperties.AutomationId="StartAtSignInCheckbox"
-                DockPanel.Dock="Top"
-                Margin="0,8,0,0"
-                Content="Start Serpy when I sign in"
+                Margin="0,4,0,0"
+                Content="Start Serpy when I sign in to Windows"
                 IsChecked="{Binding StartAtSignIn}"
                 Command="{Binding SetAutostartCommand}"
                 CommandParameter="{Binding IsChecked, RelativeSource={RelativeSource Self}}" />
 
-      <!-- Show-details disclosure (R38: Restart and Recover sit under Show details) -->
-      <Expander AutomationProperties.AutomationId="DetailsExpander"
-                DockPanel.Dock="Bottom"
-                Header="Show details"
-                IsExpanded="{Binding ShowDetails}"
-                Margin="0,8,0,0">
-        <StackPanel Spacing="8">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button AutomationProperties.AutomationId="RestartButton"
-                    Content="Restart"
-                    Command="{Binding RestartCommand}"
-                    IsEnabled="{Binding CanRestart}"/>
+      <!-- Show details expander -->
+      <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource LineBrush}" Margin="0,14,0,0" Padding="0,6,0,0">
+        <Expander AutomationProperties.AutomationId="DetailsExpander"
+                  Header="Show details"
+                  IsExpanded="{Binding ShowDetails, Mode=TwoWay}">
+          <StackPanel Spacing="10" Margin="0,6,0,0">
+            <!-- Tools row: Restart, Recover, Build, Initialize -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button AutomationProperties.AutomationId="RestartButton"
+                      Content="Restart"
+                      Command="{Binding RestartCommand}"
+                      IsEnabled="{Binding CanRestart}"
+                      Classes="sm" />
 
-            <Button AutomationProperties.AutomationId="RecoverButton"
-                    Content="Recover…"
-                    Command="{Binding RecoverCommand}"
-                    IsEnabled="{Binding CanRecover}"/>
+              <Button AutomationProperties.AutomationId="RecoverButton"
+                      Content="Recover…"
+                      Command="{Binding RecoverCommand}"
+                      IsEnabled="{Binding CanRecover}"
+                      Classes="sm" />
 
-            <!-- Keep legacy Build/Initialize buttons accessible under details for developer/test usage -->
-            <Button AutomationProperties.AutomationId="BuildButton"
-                    Content="Build…"
-                    Command="{Binding BuildCommand}"
-                    IsVisible="{Binding CanBuild}"/>
+              <Button AutomationProperties.AutomationId="BuildButton"
+                      Content="Build…"
+                      Command="{Binding BuildCommand}"
+                      IsEnabled="{Binding CanBuild}"
+                      Classes="sm" />
 
-            <Button AutomationProperties.AutomationId="InitializeButton"
-                    Content="Initialize…"
-                    Command="{Binding InitializeCommand}"
-                    IsVisible="{Binding CanInitialize}"/>
+              <Button AutomationProperties.AutomationId="InitializeButton"
+                      Content="Initialize…"
+                      Command="{Binding InitializeCommand}"
+                      IsEnabled="{Binding CanInitialize}"
+                      Classes="sm" />
+            </StackPanel>
+
+            <!-- Key-value facts when running -->
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,2,0,4">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="Address" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="http://127.0.0.1:18080 · works only on this PC" Margin="0,2" FontSize="12.5" />
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Sign-in" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="Administrator · password saved on this PC" Margin="0,2" FontSize="12.5" />
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Data folder" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="%LOCALAPPDATA%\Serpy" Margin="0,2" FontSize="12.5" />
+            </Grid>
+
+            <!-- Terminal log viewer -->
+            <Border Background="{StaticResource LogBgBrush}" CornerRadius="8" Padding="12,10">
+              <ScrollViewer MaxHeight="160">
+                <TextBlock AutomationProperties.AutomationId="DetailLogText"
+                           Text="{Binding DetailLog}"
+                           FontFamily="Cascadia Code,Consolas,monospace"
+                           FontSize="11.5"
+                           Foreground="{StaticResource LogTextBrush}"
+                           TextWrapping="Wrap" />
+              </ScrollViewer>
+            </Border>
           </StackPanel>
-
-          <ScrollViewer MaxHeight="160">
-            <TextBlock AutomationProperties.AutomationId="DetailLogText"
-                       Text="{Binding DetailLog}"
-                       FontFamily="Cascadia Code,Consolas,monospace"
-                       FontSize="11"
-                       TextWrapping="Wrap"
-                       Padding="10"/>
-          </ScrollViewer>
-        </StackPanel>
-      </Expander>
-
-      <Grid/>
-    </Panel>
-  </DockPanel>
+        </Expander>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
 </UserControl>

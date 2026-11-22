@@ -10,18 +10,56 @@
              x:DataType="vm:SetupViewModel">
   <ItemsControl Name="StepperList"
                 AutomationProperties.AutomationId="StepperList"
-                ItemsSource="{Binding StripItems}">
+                ItemsSource="{Binding StripItems}"
+                Margin="0,0,0,18">
     <ItemsControl.ItemsPanel>
       <ItemsPanelTemplate>
-        <StackPanel Orientation="Horizontal" Spacing="12" />
+        <UniformGrid Rows="1" Columns="5" />
       </ItemsPanelTemplate>
     </ItemsControl.ItemsPanel>
     <ItemsControl.ItemTemplate>
       <DataTemplate x:DataType="vm:SetupStripItem">
-        <TextBlock AutomationProperties.AutomationId="{Binding AutomationId, Mode=OneWay}">
-          <Run Text="{Binding Label, Mode=OneWay}" />
-          <Run Text="{Binding StateText, Mode=OneWay}" Foreground="#6B7280" />
-        </TextBlock>
+        <Border BorderThickness="0,3,0,0"
+                Padding="0,7,0,0"
+                Margin="3,0"
+                Classes.done="{Binding IsDone}"
+                Classes.working="{Binding IsWorking}"
+                Classes.pending="{Binding IsPending}">
+          <Border.Styles>
+            <Style Selector="Border.done">
+              <Setter Property="BorderBrush" Value="#2E9E5B" />
+            </Style>
+            <Style Selector="Border.working">
+              <Setter Property="BorderBrush" Value="#2F6F4F" />
+            </Style>
+            <Style Selector="Border.pending">
+              <Setter Property="BorderBrush" Value="#E3E6EA" />
+            </Style>
+          </Border.Styles>
+          <TextBlock AutomationProperties.AutomationId="{Binding AutomationId, Mode=OneWay}"
+                     Text="{Binding Label}"
+                     FontSize="11.5"
+                     HorizontalAlignment="Center"
+                     TextAlignment="Center"
+                     Classes.done="{Binding IsDone}"
+                     Classes.working="{Binding IsWorking}"
+                     Classes.pending="{Binding IsPending}">
+            <TextBlock.Styles>
+              <Style Selector="TextBlock.done">
+                <Setter Property="Foreground" Value="#1C6B3A" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Style>
+              <Style Selector="TextBlock.working">
+                <Setter Property="Foreground" Value="#1A1D21" />
+                <Setter Property="FontWeight" Value="Bold" />
+              </Style>
+              <Style Selector="TextBlock.pending">
+                <Setter Property="Foreground" Value="#6B7280" />
+                <Setter Property="FontWeight" Value="Normal" />
+              </Style>
+            </TextBlock.Styles>
+          </TextBlock>
+        </Border>
       </DataTemplate>
     </ItemsControl.ItemTemplate>
   </ItemsControl>

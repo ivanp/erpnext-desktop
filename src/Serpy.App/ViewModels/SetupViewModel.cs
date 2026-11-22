@@ -53,10 +53,23 @@ public sealed class SetupStripItem : ObservableObject
         _ => string.Empty,
     };
 
+    public bool IsDone => State == SetupStripState.Done;
+    public bool IsWorking => State == SetupStripState.Working;
+    public bool IsPending => State == SetupStripState.Pending;
+
     public SetupStripState State
     {
         get => _state;
-        set => SetProperty(ref _state, value);
+        set
+        {
+            if (SetProperty(ref _state, value))
+            {
+                OnPropertyChanged(nameof(StateText));
+                OnPropertyChanged(nameof(IsDone));
+                OnPropertyChanged(nameof(IsWorking));
+                OnPropertyChanged(nameof(IsPending));
+            }
+        }
     }
 }
 
@@ -528,6 +541,15 @@ public partial class SetupViewModel : ObservableObject
 
     [RelayCommand]
     private void SaveDetails() => SaveDetailsRequested?.Invoke(this, DetailLogText);
+
+    /// <summary>Raised when the user asks to copy text to clipboard.</summary>
+    public event EventHandler<string>? CopyTextRequested;
+
+    [RelayCommand]
+    private void CopyUsername() => CopyTextRequested?.Invoke(this, ReadyUsername);
+
+    [RelayCommand]
+    private void CopyPassword() => CopyTextRequested?.Invoke(this, ReadyPassword);
 
     [RelayCommand]
     private void ToggleDetails() => DetailsVisible = !DetailsVisible;
