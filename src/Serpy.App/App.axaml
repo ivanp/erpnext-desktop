@@ -82,7 +82,8 @@
               <ToggleButton.Template>
                 <ControlTemplate>
                   <Border Background="Transparent" Padding="{TemplateBinding Padding}">
-                    <ContentPresenter Name="PART_ContentPresenter"
+                    <ContentPresenter Name="HeaderToggleContent"
+                                      Background="Transparent"
                                       Content="{TemplateBinding Content}"
                                       ContentTemplate="{TemplateBinding ContentTemplate}" />
                   </Border>
@@ -120,6 +121,10 @@
           </StackPanel>
         </ControlTemplate>
       </Setter>
+      <Style Selector="^ /template/ ToggleButton#ExpanderHeader">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+      </Style>
       <Style Selector="^:expanded /template/ TextBlock#Chevron">
         <Setter Property="Text" Value="▾" />
       </Style>

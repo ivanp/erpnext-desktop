@@ -4,6 +4,8 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
 using Avalonia.VisualTree;
@@ -165,6 +167,25 @@ public sealed class LayoutInvariantTests
     }
 
     [AvaloniaFact]
+    public void SetupView_RestartScreen_HasBoldWhatToDo()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.ApplySetupUpdate(CreateUpdate(SetupRunState.Failed, SetupStepId.PcCheck, failure: FailureCode.RestartRequired));
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
+        win.Show();
+
+        var restartScreen = FindByAutomationId<StackPanel>(win, "RestartScreen");
+        Assert.NotNull(restartScreen);
+        var textBlocks = restartScreen.GetVisualDescendants().OfType<TextBlock>().ToArray();
+        var adviceBlock = Assert.Single(textBlocks, tb => tb.Classes.Contains("hint"));
+        Assert.True(adviceBlock.Inlines?.Count > 0);
+        Assert.Contains(adviceBlock.Inlines!, inline => inline.FontWeight == FontWeight.Bold);
+
+        win.Close();
+    }
+
+    [AvaloniaFact]
     public void SetupView_ProblemScreen_LayoutInvariants()
     {
         var vm = new DashboardViewModel();
@@ -249,6 +270,14 @@ public sealed class LayoutInvariantTests
         // In a 560px window, expander spans full panel width (> 450px, not clipped to ~350px)
         Assert.True(expander.Bounds.Width > 450, $"Expander width was {expander.Bounds.Width}, expected > 450px");
 
+        // Header toggle presenter background stays transparent when expanded (no solid blue box)
+        var headerToggle = expander.GetVisualDescendants().OfType<ToggleButton>().FirstOrDefault(t => t.Name == "ExpanderHeader");
+        Assert.NotNull(headerToggle);
+        var togglePresenter = headerToggle.GetVisualDescendants().OfType<ContentPresenter>().FirstOrDefault(p => p.Name == "HeaderToggleContent");
+        Assert.NotNull(togglePresenter);
+        Assert.True(togglePresenter.Background == null ||
+                    togglePresenter.Background == Brushes.Transparent ||
+                    (togglePresenter.Background is ISolidColorBrush scb && scb.Color.A == 0));
         var restart = FindByAutomationId<Button>(win, "RestartButton");
         Assert.NotNull(restart);
         Assert.True(restart.IsEnabled);

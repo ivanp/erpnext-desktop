@@ -147,7 +147,11 @@
                    Classes="h1"
                    Text="{Binding FailureHeadline}" />
         <TextBlock Classes="sub" Text="{Binding FailureDetail}" TextWrapping="Wrap" />
-        <TextBlock Classes="hint" Text="{Binding FailureWhatToDo}" TextWrapping="Wrap" />
+        <TextBlock Classes="hint" TextWrapping="Wrap">
+          <Run Text="{x:Static ui:UiText.WhatToDoLabel}" FontWeight="Bold" />
+          <Run Text=" " />
+          <Run Text="{Binding FailureWhatToDo}" />
+        </TextBlock>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
           <Button Name="RestartLaterButton"
                   AutomationProperties.AutomationId="RestartLaterButton"
