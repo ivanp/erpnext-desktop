@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using Serpy.App.ViewModels;
 using Serpy.App.Views;
@@ -36,11 +37,21 @@ public sealed class LayoutInvariantTests
             .FirstOrDefault(v => AutomationProperties.GetAutomationId(v) == automationId);
 
     [AvaloniaFact]
+    public void DashboardWindow_DefaultDimensions_MatchMockup()
+    {
+        var win = new DashboardWindow(false);
+        Assert.Equal(560, win.Width);
+        Assert.Equal(560, win.Height);
+        Assert.Equal(480, win.MinWidth);
+        Assert.Equal(440, win.MinHeight);
+    }
+
+    [AvaloniaFact]
     public void SetupView_WelcomeScreen_LayoutInvariants()
     {
         var vm = new DashboardViewModel();
         vm.Setup.Activate();
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var welcome = FindByAutomationId<StackPanel>(win, "WelcomeScreen");
@@ -50,6 +61,7 @@ public sealed class LayoutInvariantTests
         var startBtn = FindByAutomationId<Button>(win, "StartSetupButton");
         Assert.NotNull(startBtn);
         Assert.True(startBtn.IsVisible);
+        Assert.True(startBtn.Bounds.Right <= win.Bounds.Width);
 
         var check = FindByAutomationId<CheckBox>(win, "WelcomeStartAtSignInCheck");
         Assert.NotNull(check);
@@ -59,6 +71,7 @@ public sealed class LayoutInvariantTests
         var expander = FindByAutomationId<Expander>(win, "DetailsExpander");
         Assert.NotNull(expander);
         Assert.False(expander.IsExpanded);
+        Assert.Equal("Show details", expander.Header?.ToString());
 
         win.Close();
     }
@@ -69,7 +82,7 @@ public sealed class LayoutInvariantTests
         var vm = new DashboardViewModel();
         vm.Setup.Activate();
         vm.Setup.ApplySetupUpdate(CreateUpdate(SetupRunState.Working, SetupStepId.PcCheck));
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var checking = FindByAutomationId<StackPanel>(win, "CheckingScreen");
@@ -80,12 +93,46 @@ public sealed class LayoutInvariantTests
         Assert.NotNull(stepper);
         Assert.True(stepper.IsVisible);
 
-        // Verify all 5 strip items exist
         for (var i = 1; i <= 5; i++)
         {
             var item = FindByAutomationId<TextBlock>(win, $"StripItem{i}");
             Assert.NotNull(item);
         }
+
+        win.Close();
+    }
+
+    [AvaloniaFact]
+    public void SetupView_Installing_NoDoubleNowPrefix()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.ApplySetupUpdate(CreateUpdate(SetupRunState.Working, SetupStepId.Build));
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
+        win.Show();
+
+        var activity = FindByAutomationId<TextBlock>(win, "ActivityText");
+        Assert.NotNull(activity);
+        Assert.False(string.IsNullOrWhiteSpace(activity.Text));
+        Assert.DoesNotContain("Now: Now:", activity.Text);
+        Assert.StartsWith("Now: ", activity.Text);
+
+        win.Close();
+    }
+
+    [AvaloniaFact]
+    public void SetupView_CannotRunAndProblem_HasBoldWhatToDo()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.ApplySetupUpdate(CreateUpdate(SetupRunState.Failed, SetupStepId.PcCheck, failure: FailureCode.PcCheckFinding));
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
+        win.Show();
+
+        var cannotRun = FindByAutomationId<TextBlock>(win, "CannotRunWhatToDoText");
+        Assert.NotNull(cannotRun);
+        Assert.True(cannotRun.Inlines?.Count > 0);
+        Assert.Contains(cannotRun.Inlines!, inline => inline.FontWeight == FontWeight.Bold);
 
         win.Close();
     }
@@ -103,7 +150,7 @@ public sealed class LayoutInvariantTests
             null,
             null,
             Setup: new SetupSummary(Finished: true, Working: false, FailureCode.None)));
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var ready = FindByAutomationId<StackPanel>(win, "ReadyScreen");
@@ -126,7 +173,7 @@ public sealed class LayoutInvariantTests
             SetupRunState.Failed,
             SetupStepId.Download,
             failure: FailureCode.NetworkUnavailable));
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var problem = FindByAutomationId<StackPanel>(win, "ProblemScreen");
@@ -140,6 +187,11 @@ public sealed class LayoutInvariantTests
         var saveDetails = FindByAutomationId<Button>(win, "SaveDetailsButton");
         Assert.NotNull(saveDetails);
         Assert.True(saveDetails.IsVisible);
+
+        var whatToDo = FindByAutomationId<TextBlock>(win, "FailureWhatToDoText");
+        Assert.NotNull(whatToDo);
+        Assert.True(whatToDo.Inlines?.Count > 0);
+        Assert.Contains(whatToDo.Inlines!, inline => inline.FontWeight == FontWeight.Bold);
 
         win.Close();
     }
@@ -159,12 +211,17 @@ public sealed class LayoutInvariantTests
             ShowDetails = true,
             DetailLog = "Address: http://127.0.0.1:18080\nVersions: ERPNext 16.32.3",
         };
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var badge = FindByAutomationId<TextBlock>(win, "StatusBadge");
         Assert.NotNull(badge);
         Assert.Equal("Running", badge.Text);
+        var badgeBorder = badge.GetVisualAncestors().OfType<Border>().FirstOrDefault(b => b.Classes.Contains("badge"));
+        Assert.NotNull(badgeBorder);
+        Assert.Contains("ok", badgeBorder.Classes);
+        Assert.Equal("ERPNext is running on this PC. It opens in your web browser.", vm.SubtitleText);
+        Assert.Equal("http://127.0.0.1:18080 · works only on this PC", vm.AddressDisplayText);
 
         var openBtn = FindByAutomationId<Button>(win, "OpenErpNextButton");
         Assert.NotNull(openBtn);
@@ -187,6 +244,10 @@ public sealed class LayoutInvariantTests
         var expander = FindByAutomationId<Expander>(win, "DetailsExpander");
         Assert.NotNull(expander);
         Assert.True(expander.IsExpanded);
+        Assert.Equal("Hide details", expander.Header?.ToString());
+
+        // In a 560px window, expander spans full panel width (> 450px, not clipped to ~350px)
+        Assert.True(expander.Bounds.Width > 450, $"Expander width was {expander.Bounds.Width}, expected > 450px");
 
         var restart = FindByAutomationId<Button>(win, "RestartButton");
         Assert.NotNull(restart);
@@ -224,7 +285,7 @@ public sealed class LayoutInvariantTests
             ShowDetails = true,
         };
         vm.Setup.Deactivate();
-        var win = new DashboardWindow(false) { DataContext = vm, Width = 540, Height = 480 };
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
         win.Show();
 
         var primaryAction = FindByAutomationId<Button>(win, "PrimaryActionButton");

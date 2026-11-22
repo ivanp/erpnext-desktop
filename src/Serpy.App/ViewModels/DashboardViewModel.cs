@@ -30,14 +30,17 @@ public sealed partial class DashboardViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanBuild), nameof(CanInitialize), nameof(CanRecover),
         nameof(CanStart), nameof(CanRestart), nameof(CanStop), nameof(IsHealthy),
         nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(CanExecutePrimaryAction),
-        nameof(StartOrStopButtonLabel), nameof(CanStartOrStop), nameof(CanOpenErpNext))]
+        nameof(StartOrStopButtonLabel), nameof(CanStartOrStop), nameof(CanOpenErpNext),
+        nameof(SubtitleText), nameof(AddressDisplayText))]
     private ApplianceStatus _status = new(
         ReadinessState.NotBuilt, HealthState.Stopped,
         null, null, null, null);
 
     [ObservableProperty] private string _stageText = "Not set up";
     [ObservableProperty] private int _progressPercent;
-    [ObservableProperty] private bool _showDetails;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(DetailsHeaderText))]
+    private bool _showDetails;
     [ObservableProperty] private bool _startAtSignIn;
     [ObservableProperty] private string _detailLog = string.Empty;
     [ObservableProperty] private bool _isOperationRunning;
@@ -78,6 +81,26 @@ public sealed partial class DashboardViewModel : ObservableObject
         Status.Health is HealthState.Running or HealthState.RunningUnhealthy;
 
     public bool IsHealthy => Status.Health == HealthState.Running;
+
+    public string DetailsHeaderText => ShowDetails ? "Hide details" : "Show details";
+
+    public string SubtitleText => Status.Health switch
+    {
+        HealthState.Running          => "ERPNext is running on this PC. It opens in your web browser.",
+        HealthState.RunningUnhealthy => "ERPNext is starting up. It will open in your web browser once ready.",
+        HealthState.Starting         => "Starting ERPNext on this PC.",
+        HealthState.Crashed          => "ERPNext stopped unexpectedly. Restart it or recover from a backup.",
+        _ => Status.Readiness switch
+        {
+            ReadinessState.NotBuilt     => "ERPNext is not set up on this PC yet.",
+            ReadinessState.Built        => "Setup is not finished on this PC yet.",
+            _                           => "ERPNext is stopped. Start it to open it in your web browser.",
+        },
+    };
+
+    public string AddressDisplayText => !string.IsNullOrWhiteSpace(Status.LoopbackUrl)
+        ? $"{Status.LoopbackUrl} · works only on this PC"
+        : "http://127.0.0.1:18080 · works only on this PC";
 
     public bool CanOpenErpNext => Status.Health == HealthState.Running || Status.PasswordRejected;
 

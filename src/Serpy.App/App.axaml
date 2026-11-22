@@ -59,6 +59,71 @@
     <SolidColorBrush x:Key="CardBgBrush" Color="{StaticResource CardBgColor}" />
     <SolidColorBrush x:Key="LogBgBrush" Color="{StaticResource LogBgColor}" />
     <SolidColorBrush x:Key="LogTextBrush" Color="{StaticResource LogTextColor}" />
+
+    <!-- Expander theme matching mockup details/summary -->
+    <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
+      <Setter Property="IsHitTestVisible" Value="True" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel HorizontalAlignment="Stretch">
+            <ToggleButton Name="ExpanderHeader"
+                          IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          Padding="0,4"
+                          Cursor="Hand"
+                          HorizontalAlignment="Left"
+                          HorizontalContentAlignment="Left">
+              <ToggleButton.Template>
+                <ControlTemplate>
+                  <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                    <ContentPresenter Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}" />
+                  </Border>
+                </ControlTemplate>
+              </ToggleButton.Template>
+              <StackPanel Orientation="Horizontal" Spacing="6" Background="Transparent">
+                <TextBlock Name="Chevron"
+                           Text="▸"
+                           FontSize="11"
+                           FontWeight="Bold"
+                           Foreground="{StaticResource AccentBrush}"
+                           VerticalAlignment="Center" />
+                <ContentPresenter Name="PART_HeaderPresenter"
+                                  Content="{TemplateBinding Header}"
+                                  ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                  Foreground="{StaticResource AccentBrush}"
+                                  FontWeight="SemiBold"
+                                  FontSize="12.5"
+                                  VerticalAlignment="Center" />
+              </StackPanel>
+            </ToggleButton>
+
+            <Border Name="ExpanderContent"
+                    IsVisible="{TemplateBinding IsExpanded}"
+                    HorizontalAlignment="Stretch"
+                    Padding="0"
+                    BorderThickness="0"
+                    Background="Transparent">
+              <ContentPresenter Name="PART_ContentPresenter"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch" />
+            </Border>
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+      <Style Selector="^:expanded /template/ TextBlock#Chevron">
+        <Setter Property="Text" Value="▾" />
+      </Style>
+    </ControlTheme>
   </Application.Resources>
 
   <TrayIcon.Icons>
@@ -207,20 +272,10 @@
       <Setter Property="BorderBrush" Value="{StaticResource BrandBrush}" />
     </Style>
 
-    <!-- Expander -->
+    <!-- Expander base overrides -->
     <Style Selector="Expander">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="0" />
-    </Style>
-
-    <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="0,8" />
-      <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
   </Application.Styles>
 </Application>

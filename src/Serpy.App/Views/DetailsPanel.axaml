@@ -12,7 +12,9 @@
     <Expander Name="DetailsExpander"
               AutomationProperties.AutomationId="DetailsExpander"
               Header="{Binding DetailsHeaderText}"
-              IsExpanded="{Binding DetailsVisible, Mode=TwoWay}">
+              IsExpanded="{Binding DetailsVisible, Mode=TwoWay}"
+              HorizontalAlignment="Stretch"
+              HorizontalContentAlignment="Stretch">
       <StackPanel Spacing="8" Margin="0,6,0,0">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
           <Button Classes="sm"

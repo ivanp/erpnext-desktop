@@ -20,28 +20,36 @@
         <!-- Status badge pill matching mockup .badge -->
         <Border Grid.Column="1" Margin="14,0,0,0" CornerRadius="999" Padding="12,5"
                 VerticalAlignment="Center"
+                Classes="badge"
                 Classes.ok="{Binding IsHealthy}"
-                Classes.stopped="{Binding !IsHealthy}"
-                Background="#EEF1F4">
+                Classes.stopped="{Binding !IsHealthy}">
           <Border.Styles>
-            <Style Selector="Border.ok">
+            <Style Selector="Border.badge">
+              <Setter Property="Background" Value="#EEF1F4" />
+            </Style>
+            <Style Selector="Border.badge TextBlock#StatusBadgeText">
+              <Setter Property="Foreground" Value="#6B7280" />
+            </Style>
+            <Style Selector="Border.badge Border#LedDot">
+              <Setter Property="Background" Value="#9AA3AD" />
+            </Style>
+            <Style Selector="Border.badge.ok">
               <Setter Property="Background" Value="#E7F6EC" />
             </Style>
-            <Style Selector="Border.ok TextBlock#StatusBadgeText">
+            <Style Selector="Border.badge.ok TextBlock#StatusBadgeText">
               <Setter Property="Foreground" Value="#1C6B3A" />
             </Style>
-            <Style Selector="Border.ok Border#LedDot">
+            <Style Selector="Border.badge.ok Border#LedDot">
               <Setter Property="Background" Value="#2E9E5B" />
             </Style>
           </Border.Styles>
           <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Border Name="LedDot" Width="10" Height="10" CornerRadius="5" Background="#9AA3AD" VerticalAlignment="Center" />
+            <Border Name="LedDot" Width="10" Height="10" CornerRadius="5" VerticalAlignment="Center" />
             <TextBlock Name="StatusBadgeText"
                        AutomationProperties.AutomationId="StatusBadge"
                        Text="{Binding StatusBadgeText}"
                        FontSize="13"
                        FontWeight="SemiBold"
-                       Foreground="#6B7280"
                        VerticalAlignment="Center" />
           </StackPanel>
         </Border>
@@ -57,7 +65,7 @@
       </Grid>
 
       <!-- Subtitle description -->
-      <TextBlock Classes="sub" Text="ERPNext is running on this PC. It opens in your web browser." Margin="0,0,0,2" />
+      <TextBlock Classes="sub" Text="{Binding SubtitleText}" Margin="0,0,0,2" />
 
       <!-- Operation stage text and progress bar -->
       <StackPanel Spacing="6" IsVisible="{Binding IsOperationRunning}">
@@ -112,8 +120,10 @@
       <!-- Show details expander -->
       <Border BorderThickness="0,1,0,0" BorderBrush="{StaticResource LineBrush}" Margin="0,14,0,0" Padding="0,6,0,0">
         <Expander AutomationProperties.AutomationId="DetailsExpander"
-                  Header="Show details"
-                  IsExpanded="{Binding ShowDetails, Mode=TwoWay}">
+                  Header="{Binding DetailsHeaderText}"
+                  IsExpanded="{Binding ShowDetails, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Stretch">
           <StackPanel Spacing="10" Margin="0,6,0,0">
             <!-- Tools row: Restart, Recover, Build, Initialize -->
             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -145,7 +155,7 @@
             <!-- Key-value facts when running -->
             <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,2,0,4">
               <TextBlock Grid.Row="0" Grid.Column="0" Text="Address" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
-              <TextBlock Grid.Row="0" Grid.Column="1" Text="http://127.0.0.1:18080 · works only on this PC" Margin="0,2" FontSize="12.5" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AddressDisplayText}" Margin="0,2" FontSize="12.5" />
               <TextBlock Grid.Row="1" Grid.Column="0" Text="Sign-in" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
               <TextBlock Grid.Row="1" Grid.Column="1" Text="Administrator · password saved on this PC" Margin="0,2" FontSize="12.5" />
               <TextBlock Grid.Row="2" Grid.Column="0" Text="Data folder" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
