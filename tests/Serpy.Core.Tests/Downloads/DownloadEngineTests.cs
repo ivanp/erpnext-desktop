@@ -293,7 +293,7 @@ public sealed class DownloadEngineTests : IDisposable
     [Fact]
     public async Task SecondChecksumMismatch_EndsWithChecksumMismatchCodeAndLeavesNoFile()
     {
-        var (file, _) = CreateFile("bad-hash.deb", "https://deb.debian.org/bad-hash.deb", "expected-content");
+        var (file, _) = CreateFile("bad-hash.deb", "https://deb.debian.org/bad-hash.deb", "expected-content-abc");
         var inputs = new BuildInputs
         {
             SchemaVersion = 1,
@@ -302,7 +302,7 @@ public sealed class DownloadEngineTests : IDisposable
         };
 
         var requests = 0;
-        var badPayload = Encoding.UTF8.GetBytes("wrong-payload-from-server");
+        var badPayload = Encoding.UTF8.GetBytes("expected-content-xyz"); // exact same length 20, different hash
         var handler = new MockHttpMessageHandler((_, _) =>
         {
             Interlocked.Increment(ref requests);
@@ -313,7 +313,41 @@ public sealed class DownloadEngineTests : IDisposable
         var ex = await Assert.ThrowsAsync<DownloadException>(() => engine.DownloadPartsAsync());
 
         Assert.Equal(FailureCode.ChecksumMismatch, ex.Code);
+        Assert.Contains("Checksum mismatch", ex.Message);
+        Assert.Contains(file.Key, ex.Message);
         Assert.Equal(2, requests); // Downloaded once, retried once, then failed closed
+        Assert.False(File.Exists(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task SizeMismatch_ReportsWrongSizeAndDistinguishesFromChecksumMismatch()
+    {
+        var (file, _) = CreateFile("size-mismatch.deb", "https://deb.debian.org/size-mismatch.deb", "expected-content-long");
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "size-part", Title = "Size Part", Files = [file] }]
+        };
+
+        var requests = 0;
+        var shortPayload = Encoding.UTF8.GetBytes("short");
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            Interlocked.Increment(ref requests);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(shortPayload) });
+        });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        var ex = await Assert.ThrowsAsync<DownloadException>(() => engine.DownloadPartsAsync());
+
+        Assert.Equal(FailureCode.ChecksumMismatch, ex.Code);
+        Assert.Contains("Wrong size: expected", ex.Message);
+        Assert.Contains($"expected {file.Size} bytes, got {shortPayload.Length}", ex.Message);
+        Assert.Contains(file.Key, ex.Message);
+        Assert.Contains("size-part", ex.Message);
+        Assert.Equal(2, requests);
         Assert.False(File.Exists(_cache.GetPath(file.Key)));
         Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
     }

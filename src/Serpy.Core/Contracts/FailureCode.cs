@@ -20,4 +20,5 @@ public enum FailureCode
     GuestConsoleClosed,
     PasswordRejected,
     DataUnusable,
+    PortInUse,
 }

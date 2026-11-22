@@ -135,7 +135,8 @@ public sealed class SetupStepTests : IDisposable
                 preserveData = preserve;
                 return Task.FromResult(new OperationResult(
                     id, OperationKind.Build, OperationOutcome.Success, "built"));
-            });
+            },
+            settings: new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() });
 
         var result = await step.RunAsync(Context(), CancellationToken.None);
 

@@ -64,6 +64,10 @@ public sealed class RecoverOperation(
         if (!File.Exists(replacementImagePath))
             return Fail(operationId, $"Replacement image not found: {replacementImagePath}", logPath);
 
+        var portConflict = PortProbe.CheckErpNextPort(settings.ErpNextPort, stateStore, operationId, OperationKind.Recover, logPath);
+        if (portConflict is not null)
+            return portConflict;
+
         if (IsCurrentSystemImageReplacement(SystemImagePath, replacementImagePath))
             return Fail(operationId,
                 "Replacement image must be a distinct file from the current system image.", logPath);

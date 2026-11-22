@@ -293,8 +293,8 @@ public sealed class DownloadEngine
             }
 
             // Verify size and checksum on .part
-            var checksumMatches = VerifyFileIntegrity(partPath, file);
-            if (!checksumMatches)
+            var (integrityValid, mismatchReason) = VerifyFileIntegrity(partPath, file);
+            if (!integrityValid)
             {
                 mismatchCount++;
                 if (File.Exists(partPath))
@@ -308,9 +308,12 @@ public sealed class DownloadEngine
                     {
                         try { File.Delete(targetPath); } catch { }
                     }
+                    var failMsg = mismatchReason is not null && mismatchReason.StartsWith("Wrong size", StringComparison.OrdinalIgnoreCase)
+                        ? $"Wrong size for file '{file.Key}' in part '{part.Id}': {mismatchReason}. Discarded bad file."
+                        : $"Second checksum mismatch for file '{file.Key}' in part '{part.Id}': {mismatchReason ?? "hash mismatch"}. Discarded bad file.";
                     throw new DownloadException(
                         FailureCode.ChecksumMismatch,
-                        $"Second checksum mismatch for file '{file.Key}' in part '{part.Id}'. Discarded bad file.",
+                        failMsg,
                         part.Id);
                 }
 
@@ -445,20 +448,22 @@ public sealed class DownloadEngine
         }
     }
 
-    private static bool VerifyFileIntegrity(string path, InputFile file)
+    private static (bool Valid, string? Reason) VerifyFileIntegrity(string path, InputFile file)
     {
-        if (!File.Exists(path)) return false;
+        if (!File.Exists(path)) return (false, "File does not exist");
 
         var info = new FileInfo(path);
         if (file.Size > 0 && info.Length != file.Size)
-            return false;
+            return (false, $"Wrong size: expected {file.Size} bytes, got {info.Length}");
 
         if (!string.IsNullOrWhiteSpace(file.Sha256))
         {
             using var sha = SHA256.Create();
             using var stream = File.OpenRead(path);
             var actual = Convert.ToHexString(sha.ComputeHash(stream));
-            return string.Equals(actual, file.Sha256, StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(actual, file.Sha256, StringComparison.OrdinalIgnoreCase))
+                return (false, $"Checksum mismatch: expected SHA-256 {file.Sha256}, got {actual}");
+            return (true, null);
         }
 
         if (!string.IsNullOrWhiteSpace(file.Sha512))
@@ -466,10 +471,12 @@ public sealed class DownloadEngine
             using var sha = SHA512.Create();
             using var stream = File.OpenRead(path);
             var actual = Convert.ToHexString(sha.ComputeHash(stream));
-            return string.Equals(actual, file.Sha512, StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(actual, file.Sha512, StringComparison.OrdinalIgnoreCase))
+                return (false, $"Checksum mismatch: expected SHA-512 {file.Sha512}, got {actual}");
+            return (true, null);
         }
 
-        return false;
+        return (false, "No checksum specified for file");
     }
 
     private static bool IsRefusal(HttpStatusCode code) =>

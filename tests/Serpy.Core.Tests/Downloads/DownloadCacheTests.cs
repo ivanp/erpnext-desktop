@@ -128,9 +128,11 @@ public sealed class DownloadCacheTests : IDisposable
         var targetPath = _cache.GetPath(file.Key);
         File.WriteAllBytes(targetPath, payload);
 
-        var verified = _cache.TryVerify(file);
+        var verified = _cache.TryVerify(file, out var reason);
 
         Assert.False(verified);
         Assert.False(File.Exists(targetPath));
+        Assert.NotNull(reason);
+        Assert.Contains("Wrong size: expected 99999 bytes, got 5", reason);
     }
 }

@@ -95,6 +95,14 @@ public sealed class BuildOperation(
 
         try
         {
+            // 0. Port availability preflight BEFORE packing or spawning
+            var portConflict = PortProbe.CheckErpNextPort(settings.ErpNextPort, stateStore, operationId, opKind, logPath);
+            if (portConflict is not null)
+            {
+                log.Info(portConflict.Message);
+                return portConflict;
+            }
+
             // 1. Clean up leftovers from any earlier crashed or interrupted run (KTD10)
             RemoveStaging();
             DeleteIfPresent(SeedIsoPath);

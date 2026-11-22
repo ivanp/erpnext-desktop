@@ -57,8 +57,11 @@ public sealed class DownloadCache
         }
     }
 
-    public bool TryVerify(InputFile file)
+    public bool TryVerify(InputFile file) => TryVerify(file, out _);
+
+    public bool TryVerify(InputFile file, out string? failureReason)
     {
+        failureReason = null;
         if (string.IsNullOrWhiteSpace(file.Key)) return false;
 
         if (_verifiedInRun.ContainsKey(file.Key))
@@ -72,6 +75,7 @@ public sealed class DownloadCache
             var info = new FileInfo(path);
             if (file.Size > 0 && info.Length != file.Size)
             {
+                failureReason = $"Wrong size: expected {file.Size} bytes, got {info.Length}";
                 File.Delete(path);
                 return false;
             }
@@ -83,6 +87,7 @@ public sealed class DownloadCache
                 var actualHex = Convert.ToHexString(sha.ComputeHash(stream));
                 if (!string.Equals(actualHex, file.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
+                    failureReason = $"Checksum mismatch: expected SHA-256 {file.Sha256}, got {actualHex}";
                     File.Delete(path);
                     return false;
                 }
@@ -94,6 +99,7 @@ public sealed class DownloadCache
                 var actualHex = Convert.ToHexString(sha.ComputeHash(stream));
                 if (!string.Equals(actualHex, file.Sha512, StringComparison.OrdinalIgnoreCase))
                 {
+                    failureReason = $"Checksum mismatch: expected SHA-512 {file.Sha512}, got {actualHex}";
                     File.Delete(path);
                     return false;
                 }

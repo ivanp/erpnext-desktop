@@ -63,6 +63,10 @@ public sealed class InitializeOperation(
                 operationId, OperationKind.Initialize, stage,
                 UpdateSeverity.Info, msg, pct, null));
         }
+        // Preflight: port not foreign-owned.
+        var portConflict = PortProbe.CheckErpNextPort(settings.ErpNextPort, stateStore, operationId, OperationKind.Initialize, logPath);
+        if (portConflict is not null)
+            return portConflict;
 
         // Guard: refuse if already committed.
         if (File.Exists(DataMarkerPath) || File.Exists(FinalDataPath))
@@ -75,7 +79,6 @@ public sealed class InitializeOperation(
             return Fail(operationId,
                 "System image is missing a valid Serpy acceptance manifest. Build a verified system image before initialization.",
                 logPath);
-
         try
         {
             // Keep the accepted image untouched until init-data, the health gate and clean

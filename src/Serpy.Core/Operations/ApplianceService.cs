@@ -52,7 +52,7 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         _stateStore = stateStore;
         _healthCredentials = healthCredentials;
         _certStore = certStore;
-        _settings = settings;
+        _settings = settings ?? new ApplianceSettings();
         _healthCheckerFactory = healthCheckerFactory;
         _lock      = new LifecycleLock();
         var setupStore = new SetupStateStore();
@@ -68,21 +68,21 @@ public sealed class ApplianceService : IApplianceService, IDisposable
         }
         _buildOp   = new BuildOperation(
             imageDownloader, seedWriter, imageTool,
-            runtimeResolver, certStore, stateStore, manifest, settings,
+            runtimeResolver, certStore, stateStore, manifest, _settings,
             buildInputs, downloadCache);
         _initOp    = new InitializeOperation(
             imageTool, runtimeResolver, certStore,
-            healthCredentials, stateStore, settings);
+            healthCredentials, stateStore, _settings);
         _startOp   = new StartOperation(
-            runtimeResolver, certStore, healthCredentials, stateStore, settings);
+            runtimeResolver, certStore, healthCredentials, stateStore, _settings);
         _stopOp    = new StopOperation(stateStore, certStore);
         _recoverOp = new RecoverOperation(
             imageTool, runtimeResolver, certStore,
-            healthCredentials, stateStore, manifest, settings);
+            healthCredentials, stateStore, manifest, _settings);
         _inspectArchiveOp = new InspectArchiveOperation(manifest);
         _adoptOp   = new AdoptOperation(
             imageTool, runtimeResolver, certStore,
-            healthCredentials, stateStore, manifest, settings);
+            healthCredentials, stateStore, manifest, _settings);
         _resetOp   = new ResetOperation(
             _stopOp, healthCredentials, stateStore, setupStore);
         AdoptOperation.ReconcileJournal(stateStore, healthCredentials);
@@ -105,10 +105,10 @@ public sealed class ApplianceService : IApplianceService, IDisposable
 
         steps.Add(new DownloadStep(downloadEngine, downloadCache));
 
-        steps.Add(new BuildStep(_buildOp, stateStore, setupStore));
+        steps.Add(new BuildStep(_buildOp, stateStore, setupStore, settings: _settings));
         steps.Add(new CompanyDataStep(
             _initOp, stateStore, _adoptOp, _inspectArchiveOp, setupStore, healthCredentials));
-        steps.Add(new StartStep(_startOp, stateStore));
+        steps.Add(new StartStep(_startOp, stateStore, settings: _settings));
         _setupOp   = new SetupOperation(
             steps,
             setupStore, stateStore,

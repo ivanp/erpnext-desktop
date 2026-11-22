@@ -91,6 +91,11 @@ public sealed class StartOperation(
                 "System image is missing a valid Serpy acceptance manifest. Build or recover before starting.",
                 logPath);
 
+        // Preflight: port not foreign-owned.
+        var portConflict = PortProbe.CheckErpNextPort(settings.ErpNextPort, stateStore, operationId, OperationKind.Start, logPath);
+        if (portConflict is not null)
+            return portConflict;
+
         // Preflight: WHPX probe.
         Report("preflight", "Probing WHPX accelerator…", 5);
         var accel = AcceleratorPolicy.Resolve();

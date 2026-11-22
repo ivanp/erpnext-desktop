@@ -3,7 +3,7 @@ using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
 using Serpy.Core.Images;
 using Serpy.Core.Operations;
-
+using Serpy.Core.Qemu;
 namespace Serpy.Core.Setup;
 
 /// <summary>
@@ -16,17 +16,20 @@ public sealed class BuildStep(
     StateStore stateStore,
     SetupStateStore? setupStore = null,
     Func<string>? applianceDir = null,
-    Func<Guid, IProgress<OperationUpdate>, bool, CancellationToken, Task<OperationResult>>? execute = null) : ISetupStep
+    Func<Guid, IProgress<OperationUpdate>, bool, CancellationToken, Task<OperationResult>>? execute = null,
+    ApplianceSettings? settings = null) : ISetupStep
 {
     private readonly SetupStateStore? _setupStore = setupStore;
     private readonly Func<string> _applianceDir = applianceDir ?? (() => KnownPaths.ApplianceDir);
     private readonly Func<Guid, IProgress<OperationUpdate>, bool, CancellationToken, Task<OperationResult>> _execute =
         execute ?? ((id, progress, preserve, ct) => build.ExecuteAsync(id, progress, preserve, ct));
+    private readonly ApplianceSettings _settings = settings ?? new ApplianceSettings();
 
     public SetupStepId Id => SetupStepId.Build;
     public int Weight => 55;
     public TimeSpan QuietTime => TimeSpan.FromMinutes(10);
 
+    public SetupStepResult? Preflight(SetupContext context) => null;
     private string SystemImage => Path.Combine(_applianceDir(), "system.qcow2");
     private string Staging => Path.Combine(_applianceDir(), ".staging-system.qcow2");
     private string Seed => Path.Combine(_applianceDir(), ".cloud-init-seed.iso");
@@ -49,6 +52,13 @@ public sealed class BuildStep(
 
     public async Task<SetupStepResult> RunAsync(SetupContext context, CancellationToken ct)
     {
+        var conflict = PortProbe.CheckErpNextPort(_settings.ErpNextPort, stateStore, context.RunId, OperationKind.Build);
+        if (conflict is not null)
+        {
+            context.Log(conflict.Message);
+            return SetupStepResult.From(conflict);
+        }
+
         var preserveData = _setupStore?.Read().CompanyDataRoute == CompanyDataRoute.AdoptExisting;
         context.Log(preserveData
             ? "Building the system image while preserving existing company data."

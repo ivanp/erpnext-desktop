@@ -97,7 +97,7 @@ public sealed class BuildOperationTests : IDisposable
         var stateStore = new StateStore(Path.Combine(_testRoot, "state.json"));
         var certStore = new TlsCertificateStore(Path.Combine(_testRoot, "certs"));
         var manifest = CreateManifest();
-        var settings = new ApplianceSettings();
+        var settings = new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() };
 
         var op = new BuildOperation(
             imageDownloader: null,
@@ -131,7 +131,7 @@ public sealed class BuildOperationTests : IDisposable
         var stateStore = new StateStore(Path.Combine(_testRoot, "state.json"));
         var certStore = new TlsCertificateStore(Path.Combine(_testRoot, "certs"));
         var manifest = CreateManifest();
-        var settings = new ApplianceSettings();
+        var settings = new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() };
 
         bool qemuStarted = false;
         var op = new BuildOperation(
@@ -168,7 +168,7 @@ public sealed class BuildOperationTests : IDisposable
         var stateStore = new StateStore(Path.Combine(_testRoot, "state.json"));
         var certStore = new TlsCertificateStore(Path.Combine(_testRoot, "certs"));
         var manifest = CreateManifest();
-        var settings = new ApplianceSettings();
+        var settings = new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() };
 
         IReadOnlyList<string>? capturedArgs = null;
 
@@ -227,7 +227,7 @@ public sealed class BuildOperationTests : IDisposable
         var stateStore = new StateStore(Path.Combine(_testRoot, "state.json"));
         var certStore = new TlsCertificateStore(Path.Combine(_testRoot, "certs"));
         var manifest = CreateManifest();
-        var settings = new ApplianceSettings();
+        var settings = new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() };
 
 
         var op = new BuildOperation(
@@ -282,7 +282,7 @@ public sealed class BuildOperationTests : IDisposable
         var stateStore = new StateStore(Path.Combine(_testRoot, "state.json"));
         var certStore = new TlsCertificateStore(Path.Combine(_testRoot, "certs"));
         var manifest = CreateManifest();
-        var settings = new ApplianceSettings();
+        var settings = new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() };
 
 
         var op = new BuildOperation(

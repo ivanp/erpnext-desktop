@@ -72,7 +72,8 @@ public sealed class SetupServiceTests : IDisposable
 
     private ApplianceService ServiceWith(IPcProbe? probe) =>
         new(null!, null!, null!, null!, null!, null!,
-            new StateStore(Path.Combine(_dir, "state.json")), new VersionManifest(), null!,
+            new StateStore(Path.Combine(_dir, "state.json")), new VersionManifest(),
+            new ApplianceSettings { ErpNextPort = Serpy.Core.Qemu.EphemeralPort.Allocate() },
             pcProbe: probe);
 
     [Fact]
