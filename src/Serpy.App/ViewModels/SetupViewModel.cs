@@ -311,8 +311,8 @@ public partial class SetupViewModel : ObservableObject
         StepElapsedText = UiText.TimeOnStep(update.StepElapsed);
 
         ApplySteps(update.Steps, update.CurrentStep);
-        ApplyRunState(update);
         StartDetailsTail(update.RunId);
+        ApplyRunState(update);
         ApplyDownloadParts(update.DownloadParts);
     }
 
@@ -721,7 +721,7 @@ public partial class SetupViewModel : ObservableObject
 
             default:
                 SetScreen(MapFailure(result.Code));
-                ApplyFailureText(result.Code, null);
+                ApplyFailureText(result.Code, result.Outcome == OperationOutcome.Cancelled ? null : result.Message);
                 break;
         }
     }
@@ -730,8 +730,20 @@ public partial class SetupViewModel : ObservableObject
     {
         var f = UiText.Failure(failure == FailureCode.None ? FailureCode.Unknown : failure);
         FailureHeadline = f.Headline;
-        FailureDetail = failureMessage ?? f.Detail;
+        FailureDetail = f.Detail;
         FailureWhatToDo = f.WhatToDo;
+
+        if (!string.IsNullOrWhiteSpace(failureMessage) &&
+            !_detailsBuffer.ToString().Contains(failureMessage, StringComparison.Ordinal))
+        {
+            if (_detailsBuffer.Length > 0)
+            {
+                _detailsBuffer.AppendLine();
+            }
+
+            _detailsBuffer.Append(failureMessage);
+            DetailLogText = _detailsBuffer.ToString();
+        }
     }
 
     private void StartDetailsTail(Guid runId)

@@ -256,6 +256,23 @@ public sealed class SetupViewModelTests
     }
 
     [Fact]
+    public void FailureMessage_KeepsRawMessageInDetailsLogAndNotDefaultScreen()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        const string rawMessage = "Port 18080 is already used by another program on this computer. Close the conflicting program before running.";
+        var update = new SetupUpdate(
+            Guid.NewGuid(), SetupRunState.Failed, NoSteps, SetupStepId.Start, 0, "Checking port",
+            TimeSpan.FromSeconds(10), false, FailureCode.PortInUse, rawMessage);
+
+        vm.ApplySetupUpdate(update);
+
+        Assert.Equal(UiText.Failure(FailureCode.PortInUse).Detail, vm.FailureDetail);
+        Assert.DoesNotContain("Port", vm.FailureDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("18080", vm.FailureDetail, StringComparison.Ordinal);
+        Assert.Contains("Port 18080", vm.DetailLogText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Strip_MapsEveryStepToItsPosition()
     {
         var vm = new SetupViewModel(new FakeApplianceService());
