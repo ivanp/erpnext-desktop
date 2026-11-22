@@ -464,17 +464,46 @@ public sealed class ManagedRuntimeResolver(RuntimeManifest manifest, DownloadEng
             {
                 UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
             };
             psi.ArgumentList.Add("-machine"); psi.ArgumentList.Add("none");
             psi.ArgumentList.Add("-L"); psi.ArgumentList.Add(shareDir);
             psi.ArgumentList.Add("-object");
             psi.ArgumentList.Add(
                 $"tls-creds-x509,id=probe0,endpoint=server,verify-peer=yes,dir={certStore.QemuCertDir}");
-            psi.ArgumentList.Add("-nographic");
+            psi.ArgumentList.Add("-display"); psi.ArgumentList.Add("none");
+            psi.ArgumentList.Add("-monitor"); psi.ArgumentList.Add("stdio");
             using var proc = new System.Diagnostics.Process { StartInfo = psi };
             proc.Start();
-            var stderr = await proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
+            // QEMU keeps its monitor open on stdin and never exits on its own (-nographic
+            // also garbles piped input on Windows, so the monitor is explicit). An
+            // object-creation failure exits at once; after a successful start ask the
+            // monitor to quit and bound the whole probe.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            var stderrTask = proc.StandardError.ReadToEndAsync(timeout.Token);
+            try
+            {
+                // The monitor drops input sent before it has finished starting.
+                await Task.Delay(TimeSpan.FromSeconds(2), timeout.Token);
+                if (!proc.HasExited)
+                {
+                    await proc.StandardInput.WriteLineAsync("quit".AsMemory(), timeout.Token);
+                    await proc.StandardInput.FlushAsync(timeout.Token);
+                }
+            }
+            catch (IOException) { /* QEMU already exited (object creation failed) */ }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { /* handled by the wait below */ }
+            try
+            {
+                await proc.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                throw new TimeoutException("The QEMU TLS check did not finish within 30 seconds.");
+            }
+            var stderr = await stderrTask;
             if (stderr.Contains("Object type not found", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     "QEMU bundle does not have GnuTLS/TLS support. " +
