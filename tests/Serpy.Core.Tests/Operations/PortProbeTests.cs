@@ -5,6 +5,7 @@ using Serpy.Core.Contracts;
 using Serpy.Core.Coordination;
 using Serpy.Core.Operations;
 using Serpy.Core.Qemu;
+using Serpy.Core.Health;
 using Serpy.Core.Setup;
 using Serpy.Core.Versions;
 
@@ -246,6 +247,60 @@ public sealed class PortProbeTests : IDisposable
         finally
         {
             listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task AdoptOperation_ExecuteAsync_WhenPortOccupied_ReturnsPortInUseFailure()
+    {
+        var prevAppdata = Environment.GetEnvironmentVariable("SERPY_TEST_APPDATA");
+        try
+        {
+            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", _dir);
+            var applianceDir = KnownPaths.ApplianceDir;
+            Directory.CreateDirectory(applianceDir);
+            var archivePath = Path.Combine(applianceDir, "data.img");
+            File.WriteAllBytes(archivePath, new byte[] { 1, 2, 3 });
+            File.WriteAllText(Path.Combine(applianceDir, "system.qcow2"), "system");
+
+            var store = MakeStore();
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                var settings = new ApplianceSettings { ErpNextPort = port };
+                var op = new AdoptOperation(
+                    imageTool: null!,
+                    runtimeResolver: null!,
+                    certStore: null!,
+                    healthCredentials: new HealthCredentials(Path.Combine(_dir, "creds")),
+                    stateStore: store,
+                    manifest: new VersionManifest(),
+                    settings: settings);
+
+                var inspection = new ArchiveInspection(
+                    ArchiveInspectionVerdict.AuthenticatedPreflightPassed,
+                    archivePath);
+                var parameters = new AdoptParameters(archivePath, "admin");
+
+                var result = await op.ExecuteAsync(
+                    Guid.NewGuid(), parameters, inspection, legacyConsentApproved: true,
+                    new Progress<OperationUpdate>(), CancellationToken.None);
+
+                Assert.Equal(OperationOutcome.Failure, result.Outcome);
+                Assert.Equal(FailureCode.PortInUse, result.Code);
+                Assert.Contains($"Port {port} is already used", result.Message);
+                Assert.False(File.Exists(Path.Combine(applianceDir, ".pending-adopted-data.img")));
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SERPY_TEST_APPDATA", prevAppdata);
         }
     }
 }

@@ -55,7 +55,7 @@ public static class PortProbe
 
         if (!CanBind(port))
         {
-            var message = $"Port {port} is already used by another program on this computer. Close the conflicting program or change the port in settings before running.";
+            var message = $"Port {port} is already used by another program on this computer. Close the conflicting program before running.";
             return new OperationResult(
                 operationId,
                 kind,

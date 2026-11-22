@@ -90,7 +90,7 @@ public sealed class AdoptOperation(
 
         string canonicalArchivePath = Path.GetFullPath(parameters.ArchivePath);
 
-        // 2. Preflight free disk space (logical capacity + 2 GiB margin)
+        // 2. Preflight: free disk space (logical capacity + 2 GiB margin) and ERPNext port availability
         Report("preflight", "Preflighting disk space…", 5);
         var sourceFileInfo = new FileInfo(canonicalArchivePath);
         long requiredBytes = sourceFileInfo.Length + (2L * 1024 * 1024 * 1024);
@@ -102,6 +102,9 @@ public sealed class AdoptOperation(
             long availGb = freeSpace / (1024 * 1024 * 1024);
             return Fail(operationId, $"Insufficient free disk space. Required: {reqGb} GiB, Available: {availGb} GiB.", logPath, FailureCode.DiskFull);
         }
+        var portConflict = PortProbe.CheckErpNextPort(settings.ErpNextPort, stateStore, operationId, OperationKind.Adopt, logPath);
+        if (portConflict is not null)
+            return portConflict;
 
         // 3. Sparse-aware single-pass copy computing SHA-256 in stream (KTD4/KTD9)
         Report("copy", "Creating disposable working copy & computing digest…", 10);
