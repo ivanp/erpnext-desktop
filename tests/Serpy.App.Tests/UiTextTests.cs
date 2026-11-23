@@ -126,9 +126,18 @@ public sealed class UiTextTests
     [Fact]
     public void ANumericCheckLine_ShowsWhatWasMeasuredAndWhatIsNeeded()
     {
-        var memory = new PcCheckLine(PcCheckId.Memory, PcCheckResult.Pass, "16 GB", "8 GB", FailureCode.PcCheckFinding);
+        var memory = new PcCheckLine(PcCheckId.Memory, PcCheckResult.Pass, "16.0 GB usable", "7.0 GB usable", FailureCode.PcCheckFinding);
 
-        Assert.Equal("16 GB · needs 8 GB", UiText.CheckValue(memory));
+        Assert.Equal("16.0 GB usable · needs 7.0 GB usable", UiText.CheckValue(memory));
+    }
+
+    [Fact]
+    public void AFailureLine_ComposesLabelFoundAndNeeded_InPlainWords()
+    {
+        var memory = new PcCheckLine(PcCheckId.Memory, PcCheckResult.Fail, "6.0 GB usable", "7.0 GB usable", FailureCode.PcCheckFinding);
+
+        Assert.Equal("Memory: 6.0 GB usable — needs 7.0 GB usable", UiText.CheckFinding(memory));
+        Assert.DoesNotContain("hypervisor", UiText.CheckFinding(memory), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

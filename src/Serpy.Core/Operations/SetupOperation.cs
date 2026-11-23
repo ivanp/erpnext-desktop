@@ -48,6 +48,7 @@ public sealed class SetupOperation
     private bool _restartRequested;
     private List<string> _lastLogPaths = [];
     private string? _lastPcCheckReport;
+    private IReadOnlyList<PcCheckLine>? _lastPcCheckFindings;
     private IReadOnlyList<PartDownloadSnapshot>? _downloadParts;
 
     public SetupOperation(
@@ -107,6 +108,7 @@ public sealed class SetupOperation
             _current = null;
             _lastLogPaths = [logPath];
             _lastPcCheckReport = null;
+            _lastPcCheckFindings = null;
         }
 
         IDisposable? powerHold = null;
@@ -182,7 +184,11 @@ public sealed class SetupOperation
                 powerHold ??= _power.Hold();
 
                 var outcome = await RunStepAsync(step, context, log, ct);
-                lock (_gate) _lastPcCheckReport = context.PcCheckReport ?? _lastPcCheckReport;
+                lock (_gate)
+                {
+                    _lastPcCheckReport = context.PcCheckReport ?? _lastPcCheckReport;
+                    _lastPcCheckFindings = context.PcCheckFindings ?? _lastPcCheckFindings;
+                }
                 if (outcome.Outcome == OperationOutcome.Success)
                 {
                     if (!string.IsNullOrEmpty(outcome.LogPath)) AddLog(outcome.LogPath);
@@ -440,7 +446,7 @@ public sealed class SetupOperation
         _progress?.Report(new SetupUpdate(
             _runId, run, steps, _current, percent, _activity,
             _current is null ? TimeSpan.Zero : now - _stepStarted,
-            _stuck, failure, message, _downloadParts));
+            _stuck, failure, message, _downloadParts, _lastPcCheckFindings));
     }
 
     private SetupResult Result(

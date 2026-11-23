@@ -246,4 +246,54 @@ public sealed class AppShellHeadlessTests
 
         window.Close();
     }
+
+    [AvaloniaFact]
+    public void EverydayView_DetailLogText_IsSelectableTextBlock_AndCopyButtonPresent()
+    {
+        var vm = new DashboardViewModel
+        {
+            Status = new ApplianceStatus(ReadinessState.Initialized, HealthState.Running, "http://127.0.0.1:18080", null, null, null),
+            ShowDetails = true,
+            DetailLog = "hello world log line",
+        };
+        var window = new DashboardWindow { DataContext = vm };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        var logBlock = window.GetVisualDescendants().OfType<SelectableTextBlock>()
+            .FirstOrDefault(b => Avalonia.Automation.AutomationProperties.GetAutomationId(b) == "DetailLogText");
+        Assert.NotNull(logBlock);
+        Assert.Equal("hello world log line", logBlock.Text);
+
+        var copyBtn = window.GetVisualDescendants().OfType<Button>()
+            .FirstOrDefault(b => Avalonia.Automation.AutomationProperties.GetAutomationId(b) == "EverydayCopyDetailsButton");
+        Assert.NotNull(copyBtn);
+        Assert.True(copyBtn.IsEnabled);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void SetupView_DetailLogText_IsSelectableTextBlock_AndCopyButtonPresent()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.DetailsVisible = true;
+        vm.Setup.DetailLogText = "setup detail log line";
+        var window = new DashboardWindow { DataContext = vm };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        var logBlock = window.GetVisualDescendants().OfType<SelectableTextBlock>()
+            .FirstOrDefault(b => b.Name == "DetailLogText");
+        Assert.NotNull(logBlock);
+        Assert.Equal("setup detail log line", logBlock.Text);
+
+        var copyBtn = window.GetVisualDescendants().OfType<Button>()
+            .FirstOrDefault(b => b.Name == "CopyDetailsButton");
+        Assert.NotNull(copyBtn);
+        Assert.True(copyBtn.IsEnabled);
+
+        window.Close();
+    }
 }

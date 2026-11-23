@@ -27,6 +27,7 @@ public sealed class PcCheckStep(
         var report = PcCheckEvaluator.Evaluate(facts, thresholds ?? PcThresholds.Default, extraDiskBytes?.Invoke() ?? 0);
 
         context.PcCheckReport = report.ToText();
+        context.PcCheckFindings = report.Findings;
         context.Log("PC check:\n" + context.PcCheckReport);
         context.NeedsFeature = report.NeedsFeature;
 

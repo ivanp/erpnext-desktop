@@ -30,9 +30,40 @@ public sealed class LayoutInvariantTests
         int percent = 46,
         string activity = "adding ERPNext parts, 214 of 489",
         TimeSpan? elapsed = null,
-        IReadOnlyList<PartDownloadSnapshot>? downloadParts = null) => new(
+        IReadOnlyList<PartDownloadSnapshot>? downloadParts = null,
+        IReadOnlyList<PcCheckLine>? checkFindings = null) => new(
         Guid.NewGuid(), run, steps ?? (current.HasValue ? [new SetupStepStatus(current.Value, SetupStepState.Working)] : []), current, percent, activity,
-        elapsed ?? TimeSpan.FromMinutes(12), stuck, failure, DownloadParts: downloadParts);
+        elapsed ?? TimeSpan.FromMinutes(12), stuck, failure, DownloadParts: downloadParts, CheckFindings: checkFindings);
+
+    [AvaloniaFact]
+    public void SetupView_CannotRunScreen_ListsThePcCheckFindingsWithoutShowDetails()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.ApplySetupUpdate(CreateUpdate(
+            SetupRunState.Failed, SetupStepId.PcCheck, failure: FailureCode.PcCheckFinding,
+            checkFindings: new PcCheckLine[]
+            {
+                new(PcCheckId.WindowsVersion, PcCheckResult.Fail, "Windows 10 (build 19043)", "Windows 10 or 11 (build 19044 or newer)", FailureCode.PcCheckFinding),
+                new(PcCheckId.Memory, PcCheckResult.Fail, "6.0 GB usable", "7.0 GB usable", FailureCode.PcCheckFinding),
+            }));
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
+        win.Show();
+
+        AssertOnlyActiveScreenIsVisible(win, "CannotRunScreen");
+        var list = FindByAutomationId<ItemsControl>(win, "CannotRunFindingsList");
+        Assert.NotNull(list);
+        Assert.True(list.IsEffectivelyVisible);
+        Assert.Equal(2, list.ItemCount);
+        var lines = list.GetVisualDescendants().OfType<TextBlock>()
+            .Where(tb => tb.Parent is not ItemsControl)
+            .Select(tb => tb.Text)
+            .Where(t => t is not null).ToList();
+        Assert.Contains(lines, t => t!.Contains("Windows 10", StringComparison.Ordinal) && t.Contains("19043", StringComparison.Ordinal));
+        Assert.Contains(lines, t => t!.Contains("Memory", StringComparison.Ordinal) && t.Contains("7.0 GB usable", StringComparison.Ordinal));
+
+        win.Close();
+    }
 
     private static readonly string[] AllScreenRootIds =
     [
@@ -360,10 +391,15 @@ public sealed class LayoutInvariantTests
         var init = FindByAutomationId<Button>(win, "InitializeButton");
         Assert.NotNull(init);
 
-        var log = FindByAutomationId<TextBlock>(win, "DetailLogText");
+        var log = FindByAutomationId<SelectableTextBlock>(win, "DetailLogText");
         Assert.NotNull(log);
         Assert.Contains("ERPNext 16.32.3", log.Text);
 
+        var copyBtn = FindByAutomationId<Button>(win, "EverydayCopyDetailsButton");
+        Assert.NotNull(copyBtn);
+        Assert.True(copyBtn.IsEffectivelyVisible);
+        Assert.True(copyBtn.Bounds.Right <= win.ClientSize.Width);
+        Assert.True(copyBtn.Bounds.Bottom <= win.ClientSize.Height);
         win.Close();
     }
 
@@ -398,6 +434,31 @@ public sealed class LayoutInvariantTests
         var init = FindByAutomationId<Button>(win, "InitializeButton");
         Assert.NotNull(init);
         Assert.False(init.IsEnabled);
+
+        win.Close();
+    }
+
+    [AvaloniaFact]
+    public void SetupView_DetailsPanel_SelectableTextBlockAndCopyButton_FitBounds()
+    {
+        var vm = new DashboardViewModel();
+        vm.Setup.Activate();
+        vm.Setup.DetailsVisible = true;
+        vm.Setup.DetailLogText = "Setup log details line 1\nSetup log details line 2";
+        var win = new DashboardWindow(false) { DataContext = vm, Width = 560, Height = 560 };
+        win.Show();
+
+        var log = FindByAutomationId<SelectableTextBlock>(win, "DetailLogText");
+        Assert.NotNull(log);
+        Assert.True(log.IsVisible);
+        Assert.Contains("Setup log details line 1", log.Text);
+
+        var copyBtn = FindByAutomationId<Button>(win, "CopyDetailsButton");
+        Assert.NotNull(copyBtn);
+        Assert.True(copyBtn.IsEffectivelyVisible);
+        Assert.True(copyBtn.IsEnabled);
+        Assert.True(copyBtn.Bounds.Right <= win.ClientSize.Width);
+        Assert.True(copyBtn.Bounds.Bottom <= win.ClientSize.Height);
 
         win.Close();
     }

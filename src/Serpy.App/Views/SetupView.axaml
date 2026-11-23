@@ -123,6 +123,18 @@
             </StackPanel>
           </Grid>
         </Border>
+
+        <!-- What the PC check found: one plain line per finding, so "what to do" has its list. -->
+        <ItemsControl Name="CannotRunFindingsList"
+                      AutomationProperties.AutomationId="CannotRunFindingsList"
+                      ItemsSource="{Binding CheckFindings}"
+                      IsVisible="{Binding CheckFindings.Count}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Classes="fact" Text="{Binding}" TextWrapping="Wrap" Margin="0,2,0,2" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,16,0,0">
           <Button Name="CannotRunSaveButton"
                   AutomationProperties.AutomationId="CannotRunSaveButton"

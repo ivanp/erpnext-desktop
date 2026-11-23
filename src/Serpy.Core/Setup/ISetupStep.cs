@@ -74,6 +74,9 @@ public sealed class SetupContext
     /// <summary>The PC check report, for the details file. Set by the PC check step.</summary>
     public string? PcCheckReport { get; set; }
 
+    /// <summary>The PC check lines a failure screen lists. Set by the PC check step.</summary>
+    public IReadOnlyList<PcCheckLine>? PcCheckFindings { get; set; }
+
     /// <summary>True when the PC check found that Prepare must turn the Windows feature on. U7 reads it.</summary>
     public bool NeedsFeature { get; set; }
 

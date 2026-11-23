@@ -97,6 +97,23 @@ public static class UiText
 
     public static string CheckLabel(PcCheckId check) => CheckLabels.GetValueOrDefault(check, "Check");
 
+    private static readonly string FindingTemplate = Plain("{0}: {1} — needs {2}");
+
+    /// <summary>
+    /// One line of the failure screen's list: what the check found and what is needed, in the same
+    /// plain words the check list uses. The virtualization and internet lines take CheckValue's
+    /// plain words (Core's own wording names the hypervisor and the download sites, which R40 keeps
+    /// off the default screens); the numeric lines take the measured figure alone, because
+    /// CheckValue would repeat the "needs" clause.
+    /// </summary>
+    public static string CheckFinding(PcCheckLine line)
+    {
+        var found = line.Check is PcCheckId.Virtualization or PcCheckId.Internet
+            ? CheckValue(line)
+            : line.Measured;
+        return string.Format(FindingTemplate, CheckLabel(line.Check), found, line.Needed);
+    }
+
     /// <summary>
     /// The value on one line of the check list. The numeric lines show what Core measured and needed.
     /// Virtualization and the internet line never echo Core's own wording, because that wording names

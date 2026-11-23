@@ -211,6 +211,12 @@ public partial class SetupViewModel : ObservableObject
 
     public ObservableCollection<DownloadPartItem> DownloadParts { get; } = [];
 
+    /// <summary>
+    /// The PC check lines the CannotRun screen lists (one plain-language line per finding), so the
+    /// "fix what is listed above" advice has a list above it without opening Show details.
+    /// </summary>
+    public ObservableCollection<string> CheckFindings { get; } = [];
+
     public string ReadyUsername => UiText.DefaultUsername;
 
     public string ReadyPassword => UiText.DefaultPassword;
@@ -244,6 +250,7 @@ public partial class SetupViewModel : ObservableObject
     private bool _detailsVisible;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CopyDetailsCommand))]
     private string _detailLogText = string.Empty;
 
     /// <summary>Header of the details expander (Show details / Hide details).</summary>
@@ -458,6 +465,7 @@ public partial class SetupViewModel : ObservableObject
             case SetupRunState.Cancelled:
                 SetScreen(MapFailure(update.Failure));
                 ApplyFailureText(update.Failure, update.FailureMessage);
+                ApplyCheckFindings(update.CheckFindings);
                 break;
 
             case SetupRunState.Working:
@@ -544,6 +552,9 @@ public partial class SetupViewModel : ObservableObject
 
     /// <summary>Raised when the user asks to copy text to clipboard.</summary>
     public event EventHandler<string>? CopyTextRequested;
+
+    [RelayCommand(CanExecute = nameof(DetailLogFilled))]
+    private void CopyDetails() => CopyTextRequested?.Invoke(this, DetailLogText);
 
     [RelayCommand]
     private void CopyUsername() => CopyTextRequested?.Invoke(this, ReadyUsername);
@@ -733,6 +744,7 @@ public partial class SetupViewModel : ObservableObject
         FailureDetail = f.Detail;
         FailureWhatToDo = f.WhatToDo;
 
+        RefreshDetails();
         if (!string.IsNullOrWhiteSpace(failureMessage) &&
             !_detailsBuffer.ToString().Contains(failureMessage, StringComparison.Ordinal))
         {
@@ -758,6 +770,22 @@ public partial class SetupViewModel : ObservableObject
         _tailReader = new LogTailReader(path);
         _detailsBuffer.Clear();
         DetailLogText = string.Empty;
+        CheckFindings.Clear();
+    }
+
+    /// <summary>Fills or clears the failure screen's finding list (presentation mapping only).</summary>
+    private void ApplyCheckFindings(IReadOnlyList<PcCheckLine>? findings)
+    {
+        CheckFindings.Clear();
+        if (findings is null)
+        {
+            return;
+        }
+
+        foreach (var finding in findings)
+        {
+            CheckFindings.Add(UiText.CheckFinding(finding));
+        }
     }
 
     /// <summary>Points the details tail at an explicit log path (e.g. from status).</summary>

@@ -182,16 +182,25 @@
               <TextBlock Grid.Row="2" Grid.Column="0" Text="{x:Static ui:UiText.DataFolderLabel}" Classes="muted" Margin="0,2,14,2" FontSize="12.5" />
               <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DataFolderText}" Margin="0,2" FontSize="12.5" />
             </Grid>
+            <!-- Copy details button -->
+            <Button Name="EverydayCopyDetailsButton"
+                    AutomationProperties.AutomationId="EverydayCopyDetailsButton"
+                    Classes="sm"
+                    HorizontalAlignment="Right"
+                    Command="{Binding CopyDetailsCommand}"
+                    Content="{x:Static ui:UiText.Copy}" />
 
             <!-- Terminal log viewer -->
             <Border Background="{StaticResource LogBgBrush}" CornerRadius="8" Padding="12,10">
               <ScrollViewer MaxHeight="160">
-                <TextBlock AutomationProperties.AutomationId="DetailLogText"
-                           Text="{Binding DetailLog}"
-                           FontFamily="Cascadia Code,Consolas,monospace"
-                           FontSize="11.5"
-                           Foreground="{StaticResource LogTextBrush}"
-                           TextWrapping="Wrap" />
+                <SelectableTextBlock AutomationProperties.AutomationId="DetailLogText"
+                                     Text="{Binding DetailLog}"
+                                     FontFamily="Cascadia Code,Consolas,monospace"
+                                     FontSize="11.5"
+                                     Foreground="{StaticResource LogTextBrush}"
+                                     SelectionBrush="#2563EB"
+                                     SelectionForegroundBrush="#FFFFFF"
+                                     TextWrapping="Wrap" />
               </ScrollViewer>
             </Border>
           </StackPanel>

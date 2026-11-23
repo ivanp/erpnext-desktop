@@ -346,4 +346,26 @@ public sealed class DashboardViewModelTests
         Assert.True(vm.StartAtSignIn);
         Assert.True(captured);
     }
+
+    [Fact]
+    public void CopyDetailsCommand_CanExecute_FollowsHasDetailLog_AndRaisesEvent()
+    {
+        var vm = MakeVm();
+        string? copied = null;
+        vm.CopyTextRequested += (_, text) => copied = text;
+
+        Assert.False(vm.HasDetailLog);
+        Assert.False(vm.CopyDetailsCommand.CanExecute(null));
+
+        vm.DetailLog = "dashboard detail log line";
+        Assert.True(vm.HasDetailLog);
+        Assert.True(vm.CopyDetailsCommand.CanExecute(null));
+
+        vm.CopyDetailsCommand.Execute(null);
+        Assert.Equal("dashboard detail log line", copied);
+
+        vm.DetailLog = string.Empty;
+        Assert.False(vm.HasDetailLog);
+        Assert.False(vm.CopyDetailsCommand.CanExecute(null));
+    }
 }

@@ -1,7 +1,9 @@
 using Serpy.Core.Downloads;
-
 using Serpy.App.Text;
 using Serpy.App.ViewModels;
+using Serpy.Core.Setup;
+
+using Serpy.Core.Configuration;
 using Serpy.Core.Contracts;
 
 namespace Serpy.App.Tests.ViewModels;
@@ -256,6 +258,45 @@ public sealed class SetupViewModelTests
     }
 
     [Fact]
+    public void FailedPcCheck_ExposesFindingLinesForTheCannotRunScreen()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        var findings = new PcCheckLine[]
+        {
+            new(PcCheckId.Memory, PcCheckResult.Fail, "6.0 GB usable", "7.0 GB usable", FailureCode.PcCheckFinding),
+            new(PcCheckId.Virtualization, PcCheckResult.NeedsPrepare, "virtualization is on; the Windows feature is off", "the Windows feature"),
+        };
+        var update = new SetupUpdate(
+            Guid.NewGuid(), SetupRunState.Failed, NoSteps, SetupStepId.PcCheck, 0, "Checking this PC",
+            TimeSpan.FromSeconds(2), false, FailureCode.PcCheckFinding, null, CheckFindings: findings);
+
+        vm.ApplySetupUpdate(update);
+
+        Assert.Equal(SetupScreen.CannotRun, vm.CurrentSetupScreen);
+        Assert.Equal(2, vm.CheckFindings.Count);
+        Assert.Contains(UiText.CheckLabel(PcCheckId.Memory), vm.CheckFindings[0], StringComparison.Ordinal);
+        Assert.Contains("7.0 GB usable", vm.CheckFindings[0], StringComparison.Ordinal);
+        Assert.Contains(UiText.CheckLabel(PcCheckId.Virtualization), vm.CheckFindings[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailureWithoutFindings_ListsNothingRatherThanStaleLines()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        var withFindings = new SetupUpdate(
+            Guid.NewGuid(), SetupRunState.Failed, NoSteps, SetupStepId.PcCheck, 0, "Checking this PC",
+            TimeSpan.FromSeconds(2), false, FailureCode.PcCheckFinding, null,
+            CheckFindings: [new(PcCheckId.Memory, PcCheckResult.Fail, "6.0 GB usable", "7.0 GB usable", FailureCode.PcCheckFinding)]);
+
+        vm.ApplySetupUpdate(withFindings);
+        Assert.Single(vm.CheckFindings);
+
+        // The next run clears the list before its result arrives (per-run reset).
+        vm.ApplySetupUpdate(Update(SetupRunState.Working, SetupStepId.Download));
+        Assert.Empty(vm.CheckFindings);
+    }
+
+    [Fact]
     public void FailureMessage_KeepsRawMessageInDetailsLogAndNotDefaultScreen()
     {
         var vm = new SetupViewModel(new FakeApplianceService());
@@ -360,5 +401,59 @@ public sealed class SetupViewModelTests
         Assert.Equal(50, tools.Percent);
 
         Assert.Equal(UiText.PartsCached(2, 3), vm.CachedPartsLine);
+    }
+
+    [Fact]
+    public void CopyDetailsCommand_CanExecute_FollowsDetailLogFilled_AndRaisesEvent()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        string? copied = null;
+        vm.CopyTextRequested += (_, text) => copied = text;
+
+        Assert.False(vm.CopyDetailsCommand.CanExecute(null));
+
+        vm.DetailLogText = "test setup log output";
+        Assert.True(vm.CopyDetailsCommand.CanExecute(null));
+
+        vm.CopyDetailsCommand.Execute(null);
+        Assert.Equal("test setup log output", copied);
+    }
+
+    [Fact]
+    public void ApplyFailureText_FlushesLogTailBeforeAppendingFailureMessage()
+    {
+        var vm = new SetupViewModel(new FakeApplianceService());
+        var runId = Guid.NewGuid();
+        var logDir = KnownPaths.LogsDir;
+        Directory.CreateDirectory(logDir);
+        var logPath = Path.Combine(logDir, $"setup-{runId:N}.log");
+        try
+        {
+            File.WriteAllText(logPath, "first tail line\nsecond tail line\n");
+
+            // Apply failure with a message. StartDetailsTail attaches to setup-{runId:N}.log.
+            // ApplyFailureText must flush the tail before appending failure message.
+            var update = new SetupUpdate(
+                runId, SetupRunState.Failed, NoSteps, SetupStepId.Build, 50, "Build failed",
+                TimeSpan.FromMinutes(1), false, FailureCode.ProvisioningFailed, "final failure explanation");
+
+            vm.ApplySetupUpdate(update);
+
+            var text = vm.DetailLogText;
+            var firstTailIdx = text.IndexOf("first tail line", StringComparison.Ordinal);
+            var secondTailIdx = text.IndexOf("second tail line", StringComparison.Ordinal);
+            var failMsgIdx = text.IndexOf("final failure explanation", StringComparison.Ordinal);
+
+            Assert.True(firstTailIdx >= 0, "first tail line should be present");
+            Assert.True(secondTailIdx > firstTailIdx, "second tail line should be after first");
+            Assert.True(failMsgIdx > secondTailIdx, "failure explanation should be appended after tail lines");
+        }
+        finally
+        {
+            if (File.Exists(logPath))
+            {
+                File.Delete(logPath);
+            }
+        }
     }
 }

@@ -18,6 +18,11 @@
               HorizontalContentAlignment="Stretch">
       <StackPanel Spacing="8" Margin="0,6,0,0">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+          <Button Name="CopyDetailsButton"
+                  AutomationProperties.AutomationId="CopyDetailsButton"
+                  Classes="sm"
+                  Command="{Binding CopyDetailsCommand}"
+                  Content="{x:Static ui:UiText.Copy}" />
           <Button Classes="sm"
                   Command="{Binding SaveDetailsCommand}"
                   Content="{x:Static ui:UiText.SaveDetails}" />
@@ -36,14 +41,16 @@
             <ScrollViewer MaxHeight="220"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-              <TextBlock Name="DetailLogText"
-                         AutomationProperties.AutomationId="DetailLogText"
-                         FontFamily="Cascadia Code,Consolas,monospace"
-                         FontSize="11.5"
-                         Foreground="#CBD5E1"
-                         IsVisible="{Binding DetailLogFilled}"
-                         Text="{Binding DetailLogText}"
-                         TextWrapping="Wrap" />
+              <SelectableTextBlock Name="DetailLogText"
+                                   AutomationProperties.AutomationId="DetailLogText"
+                                   FontFamily="Cascadia Code,Consolas,monospace"
+                                   FontSize="11.5"
+                                   Foreground="#CBD5E1"
+                                   SelectionBrush="#2563EB"
+                                   SelectionForegroundBrush="#FFFFFF"
+                                   IsVisible="{Binding DetailLogFilled}"
+                                   Text="{Binding DetailLogText}"
+                                   TextWrapping="Wrap" />
             </ScrollViewer>
           </Panel>
         </Border>

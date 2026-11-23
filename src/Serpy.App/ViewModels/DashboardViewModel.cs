@@ -44,7 +44,10 @@ public sealed partial class DashboardViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(StatusBadgeText), nameof(PrimaryActionLabel), nameof(DetailsHeaderText))]
     private bool _showDetails;
     [ObservableProperty] private bool _startAtSignIn;
-    [ObservableProperty] private string _detailLog = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDetailLog))]
+    [NotifyCanExecuteChangedFor(nameof(CopyDetailsCommand))]
+    private string _detailLog = string.Empty;
     [ObservableProperty] private bool _isOperationRunning;
 
     // ── Derived properties (tray + dashboard) ─────────────────────────────
@@ -85,6 +88,8 @@ public sealed partial class DashboardViewModel : ObservableObject
     public bool IsHealthy => Status.Health == HealthState.Running;
     public bool IsStartingOrUnhealthy => Status.Health is HealthState.Starting or HealthState.RunningUnhealthy;
     public bool IsCrashed => Status.Health == HealthState.Crashed;
+
+    public bool HasDetailLog => !string.IsNullOrEmpty(DetailLog);
 
     public string DetailsHeaderText => ShowDetails ? "Hide details" : "Show details";
 
@@ -298,6 +303,9 @@ public sealed partial class DashboardViewModel : ObservableObject
         StageText = "Cancelling…";
     }
 
+    [RelayCommand(CanExecute = nameof(HasDetailLog))]
+    private void CopyDetails() => CopyTextRequested?.Invoke(this, DetailLog);
+
     /// <summary>
     /// An exception from a dispatched operation must not end the app: show it and keep the window
     /// alive. U9 and U10 replace this code with the typed failure screens.
@@ -326,6 +334,7 @@ public sealed partial class DashboardViewModel : ObservableObject
     public event EventHandler? ShowDashboardRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler<string>? OpenUrlRequested;
+    public event EventHandler<string>? CopyTextRequested;
     public event EventHandler<bool>? AutostartRequested;
     /// <summary>Late service attach for the guided-setup view model.</summary>
     public void SetSetupService(IApplianceService service) => Setup.AttachService(service);

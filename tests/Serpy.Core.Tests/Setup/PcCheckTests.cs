@@ -46,6 +46,7 @@ public sealed class PcCheckTests
 
     // ── disk, memory, Windows ────────────────────────────────────────────────
 
+
     [Fact]
     public void FreeSpaceBelowTheThreshold_Fails_AndReportsTheSpaceNeededAndTheSpaceFree()
     {
@@ -54,8 +55,8 @@ public sealed class PcCheckTests
         var line = Line(report, PcCheckId.DiskSpace);
         Assert.Equal(PcCheckResult.Fail, line.Result);
         Assert.Equal(FailureCode.DiskFull, line.Code);
-        Assert.Contains("12 GB free on C:", line.Measured, StringComparison.Ordinal);
-        Assert.Equal("30 GB", line.Needed);
+        Assert.Contains("12.0 GB free on C:", line.Measured, StringComparison.Ordinal);
+        Assert.Equal("30.0 GB", line.Needed);
         Assert.False(report.CanRun);
     }
 
@@ -67,26 +68,72 @@ public sealed class PcCheckTests
 
         Assert.Equal(PcCheckResult.Pass, Line(withoutData, PcCheckId.DiskSpace).Result);
         Assert.Equal(PcCheckResult.Fail, Line(withData, PcCheckId.DiskSpace).Result);
-        Assert.Equal("70 GB", Line(withData, PcCheckId.DiskSpace).Needed);
+        Assert.Equal("70.0 GB", Line(withData, PcCheckId.DiskSpace).Needed);
     }
 
     [Fact]
-    public void MemoryBelowTheThreshold_Fails_AndReportsBothFigures()
+    public void MemoryBelowTheThreshold_Fails_AndReportsDistinctFigures()
     {
         var line = Line(Run(Good(memory: 4 * Gb)), PcCheckId.Memory);
 
         Assert.Equal(PcCheckResult.Fail, line.Result);
-        Assert.Equal("4 GB", line.Measured);
-        Assert.Equal("8 GB", line.Needed);
+        Assert.Equal("4.0 GB usable", line.Measured);
+        Assert.Equal("7.0 GB usable", line.Needed);
+        Assert.NotEqual(line.Measured, line.Needed);
     }
 
     [Fact]
-    public void AWindowsBuildBelowTheThreshold_Fails()
+    public void AnEightGbPc_Passes_BecauseTheUsableFigureSitsAboveTheReserveTolerantFloor()
     {
-        var line = Line(Run(Good(build: 19044)), PcCheckId.WindowsVersion);
+        // A real 8 GB PC reports usable memory below 8 GiB; the floor tolerates the reserve.
+        var line = Line(Run(Good(memory: (long)(7.75 * Gb))), PcCheckId.Memory);
+
+        Assert.Equal(PcCheckResult.Pass, line.Result);
+        Assert.Contains("7.8 GB usable", line.Measured, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SixGb_Fails_WithFiguresThatCannotLookEqual()
+    {
+        var line = Line(Run(Good(memory: 6 * Gb)), PcCheckId.Memory);
 
         Assert.Equal(PcCheckResult.Fail, line.Result);
+        Assert.Equal("6.0 GB usable", line.Measured);
+        Assert.Equal("7.0 GB usable", line.Needed);
+    }
+
+    [Fact]
+    public void AWindows10Ltsc2021Build_Passes_WithPlainVersionWord()
+    {
+        var report = Run(Good(build: 19044));
+        var line = Line(report, PcCheckId.WindowsVersion);
+
+        Assert.Equal(PcCheckResult.Pass, line.Result);
+        Assert.True(report.CanRun);
+        Assert.Contains("Windows 10", line.Measured, StringComparison.Ordinal);
         Assert.Contains("19044", line.Measured, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWindowsBuildBelowTheThreshold_Fails_NamingTheWindowsNeeded()
+    {
+        var report = Run(Good(build: 19043));
+        var line = Line(report, PcCheckId.WindowsVersion);
+
+        Assert.Equal(PcCheckResult.Fail, line.Result);
+        Assert.Contains("19043", line.Measured, StringComparison.Ordinal);
+        Assert.Contains("Windows 10 or 11", line.Needed, StringComparison.Ordinal);
+        Assert.Contains("19044", line.Needed, StringComparison.Ordinal);
+        Assert.False(report.CanRun);
+    }
+
+    [Fact]
+    public void AWindows11Build_NamesWindows11()
+    {
+        var line = Line(Run(Good(build: 26200)), PcCheckId.WindowsVersion);
+
+        Assert.Equal(PcCheckResult.Pass, line.Result);
+        Assert.Contains("Windows 11", line.Measured, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -97,6 +144,32 @@ public sealed class PcCheckTests
         Assert.True(report.CanRun);
         Assert.All(report.Lines, l => Assert.Equal(PcCheckResult.Pass, l.Result));
         Assert.Null(report.FirstFinding);
+    }
+
+    [Fact]
+    public void Findings_ListTheFailedAndNeedsPrepareLines_InReportOrder()
+    {
+        // Memory and virtualization-off fail; the missing Windows feature only needs Prepare.
+        var report = Run(Good(memory: 4 * Gb, hypervisor: false, feature: false, firmware: true, internet: new InternetFacts(true, [new("a.example", false)])));
+
+        Assert.Equal([PcCheckId.Memory, PcCheckId.Virtualization, PcCheckId.Internet],
+            report.Findings.Select(f => f.Check).ToArray());
+    }
+
+    [Fact]
+    public void Findings_IsEmpty_WhenEveryCheckPasses()
+    {
+        Assert.Empty(Run(Good()).Findings);
+    }
+
+    [Fact]
+    public void JustUnderTheDiskThreshold_ShowsTwoDistinctFigures()
+    {
+        var line = Line(Run(Good(free: 30 * Gb - 100 * 1024 * 1024)), PcCheckId.DiskSpace);
+
+        Assert.Equal(PcCheckResult.Fail, line.Result);
+        Assert.Equal(@"29.9 GB free on C:\", line.Measured);
+        Assert.Equal("30.0 GB", line.Needed);
     }
 
     // ── virtualization ───────────────────────────────────────────────────────
@@ -215,7 +288,7 @@ public sealed class PcCheckTests
         Assert.Equal(OperationOutcome.Failure, result.Outcome);
         Assert.Equal(FailureCode.DiskFull, result.Code);
         Assert.Contains("DiskSpace", context.PcCheckReport, StringComparison.Ordinal);
-        Assert.Contains("5 GB free on C:", context.PcCheckReport, StringComparison.Ordinal);
+        Assert.Contains("5.0 GB free on C:", context.PcCheckReport, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -249,7 +322,7 @@ public sealed class PcCheckTests
         var text = Run(Good(memory: 4 * Gb)).ToText();
 
         Assert.Contains("Memory", text, StringComparison.Ordinal);
-        Assert.Contains("measured: 4 GB; needed: 8 GB", text, StringComparison.Ordinal);
+        Assert.Contains("measured: 4.0 GB usable; needed: 7.0 GB usable", text, StringComparison.Ordinal);
         Assert.Equal(5, text.Split('\n').Length);
     }
 }
