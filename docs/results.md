@@ -19,13 +19,65 @@
 
 | Suite | Tests / scope | Status |
 |---|---:|---|
-| `Serpy.Core.Tests` | 509 | Pass — 2026-11-22 |
-| `Serpy.App.Tests` | 165 | Pass — 2026-11-22 |
-| `Serpy.InstallerBootstrapper.Tests` | 20 | Pass — 2026-11-22 |
+| `Serpy.Core.Tests` | 531 | Pass — 2026-11-22 |
+| `Serpy.App.Tests` | 175 | Pass — 2026-11-22 |
+| `Serpy.InstallerBootstrapper.Tests` | 25 | Pass — 2026-11-22 |
 | `Serpy.Windows.UiTests` (`DashboardComponentTests`, `SetupComponentTests`) | 2 classes | Fail — 2026-11-22 (run before `ea0c895`): tests predate U10 layout/routing (`BuildButton`/`InitializeButton` inside collapsed `DetailsExpander`; clean launch opens `EverydayView` instead of `WelcomeScreen`) |
 | Linux x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | macOS x64 publish | compile/publish assets | Pass locally — runtime acceptance not claimed |
 | Windows appliance integration | AE3, AE5 clean run | Pass — 2026-11-21: Clean Build → Initialize → AE3 (persistence across clean restart) → AE5 (durability after unclean QEMU kill). |
+
+
+## Clean-install defect fixes (2026-11-22)
+
+Seven defects from the real clean-install test on Windows VMs, fixed with unit tests (no new
+runtime/VM run was made; the fixes are verified by the deterministic suites above):
+
+1. **Windows 10 LTSC 2021 (build 19044) is now supported.** The PC check gate moved from build
+   19045 (22H2) to 19044 (21H2); WHPX exists on all Windows 10 2004+ (19041+) editions, so 19044
+   is safe. The Windows line now says "Windows 10 (build …)" / "Windows 11 (build …)" and asks for
+   "Windows 10 or 11 (build 19044 or newer)". README.md prerequisite updated. No other code path
+   (bootstrapper, DISM enablement, WiX launch conditions) hard-codes a build number.
+2. **A genuine 8 GB PC passes the memory check.** The rule compares usable memory against a 7 GiB
+   floor that tolerates the hardware/firmware reserve (Windows reports slightly under the
+   installed size); the product requirement stays "8 GB", documented on `PcThresholds`. Figures are
+   one decimal with "usable" on memory lines, and a failing measured figure can no longer round up
+   to look equal to the needed one ("6.0 GB usable; needed: 7.0 GB usable", previously
+   "8 GB; needed: 8 GB").
+3. **The failure screen lists what the PC check found.** `SetupUpdate` now carries the failed and
+   needs-prepare `PcCheckLine`s; the CannotRun screen lists one plain-language line per finding
+   (label, what was found, what is needed) above the "what to do" text, without opening Show
+   details. Root cause: the report previously reached the UI only as log text.
+4. **Download step stall timeout on inactive body streams.** In `DownloadEngine.StreamToFileAsync`,
+   `HttpClient.Timeout` (100 s) only covered headers under `HttpCompletionOption.ResponseHeadersRead`;
+   stalled TCP connections to package/wheel mirrors blocked `ReadAsync` indefinitely. Added a 60 s
+   per-read stall timeout (`DefaultStallTimeout`) via linked `CancellationTokenSource`, throwing
+   `TimeoutException` so the existing retry/backoff, URL fallback, and
+   `FailureCode.NetworkUnavailable` reporting handle stalled connections and clean up partial `.part`
+   files.
+5. **PC check Internet probe transient retry.** In `WindowsPcProbe.ReachAsync`, a single 8.0 s HEAD
+   request per host could fail transiently right after a VM's first boot due to OS-level IPv6/IPv4
+   connect delays in Hyper-V Default Switch NAT environments (e.g. `archive.mariadb.org` dual-stack
+   DNS). Added retry up to 2 additional times with escalating per-attempt timeouts (8 s, 12 s, 15 s)
+   and a 1 s delay between attempts. Probing remains parallel; reachable on any HTTP status code;
+   user cancellation aborts immediately with `OperationCanceledException`.
+6. **Download step premature-response-end retry.** In `DownloadEngine.StreamToFileAsync`, when a
+   mirror closed the connection prematurely (e.g. `HttpIOException: The response ended prematurely, with at least 34456 additional bytes expected`),
+   the resulting `IOException` escaped `DownloadEngine` unhandled and mapped to `FailureCode.ProvisioningFailed`
+   because `DownloadFromUrlWithRetryAsync` only retried `TaskCanceledException`/`TimeoutException`/`HttpRequestException`.
+   Network stream read `IOException`s (non-disk-full) are now wrapped and rethrown as `HttpRequestException`,
+   enabling the existing 3 retries, exponential backoff, URL fallback, and `FailureCode.NetworkUnavailable`
+   mapping while leaving file write disk-full errors (`IsDiskFullException`) non-retried.
+7. **Download resume within a run.** In `DownloadEngine`, connections throttled and cut mid-stream
+   by slow upstream mirrors (such as `archive.mariadb.org` cutting after ~4 MB on ~8 MB deb files with
+   only a single download URL) repeatedly failed because every retry started from offset 0. Retries
+   on the same URL now preserve the `.part` file on disk and send `Range: bytes={length}-`. When the
+   server answers `206 Partial Content` with a matching `Content-Range`, the engine appends to the
+   file and reports only newly received bytes. Retries with forward progress do not consume the
+   retry budget (safety capped at 50 attempts). If the server ignores `Range` (returns 200), reports
+   unacceptable range bounds, or returns 416, the engine deletes the `.part` file, adjusts progress
+   accounting, and restarts fresh from 0. Fallback to an alternate URL or refetching on checksum mismatch
+   cleans up `.part` to isolate byte streams between mirrors.
 
 ### Windows Native-AOT publish
 

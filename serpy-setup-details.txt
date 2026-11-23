@@ -1,0 +1,14 @@
+13:06:33  info       Company data route decided: CreateNew.
+13:06:33  PcCheck    Started.
+13:06:35  info       PC check:
+13:06:35  info       WindowsVersion  Pass         measured: build 26200; needed: build 19045 or later
+13:06:35  info       Memory          Pass         measured: 31.7 GB; needed: 8 GB
+13:06:35  info       DiskSpace       Pass         measured: 272.2 GB free on C:\; needed: 30 GB
+13:06:35  info       Virtualization  Pass         measured: a hypervisor is running; needed: a hypervisor
+13:06:35  info       Internet        Pass         measured: every download site answered; needed: every download site
+13:06:35  Prepare    Started.
+13:06:35  info       Downloading QEMU installer before elevation.
+Elevated QEMU install is not available: the separate signed Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) is not installed at 'C:\Program Files\Serpy\Bootstrapper\Serpy.InstallerBootstrapper.exe'. No UAC elevation was attempted.
+13:07:34  info       Prepare executing: needQemu=True, needFeature=False
+13:07:34  info       Prepare failed: Elevated QEMU install is not available: the separate signed Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) is not installed at 'C:\Program Files\Serpy\Bootstrapper\Serpy.InstallerBootstrapper.exe'. No UAC elevation was attempted.
+13:07:34  Prepare    Failed: Elevated QEMU install is not available: the separate signed Serpy.InstallerBootstrapper.exe helper (IR3/IKTD1) is not installed at 'C:\Program Files\Serpy\Bootstrapper\Serpy.InstallerBootstrapper.exe'. No UAC elevation was attempted.

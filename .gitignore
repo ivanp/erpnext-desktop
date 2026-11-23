@@ -27,3 +27,6 @@ __ce-goal-prompt*
 
 # WiX Toolset local extension cache (per-repo, from `wix extension add`)
 .wix/
+
+# local VM test scaffolding (contains test credentials)
+.tmp-vm/
