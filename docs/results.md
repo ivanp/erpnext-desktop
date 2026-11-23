@@ -265,3 +265,56 @@ The download and the other steps came from two runs, because the first one faile
 | Cold run through the PC check and Prepare | The harness skips both. Needs the GUI path or a Windows probe wired into the harness, and it installs QEMU and may turn on Windows features. |
 | Clean install from the MSI to the sign-in page | Needs the reference PC and a Windows elevation prompt. |
 | Observed first-time user install | Needs a person who has installed Office and never used Serpy. |
+
+---
+
+## Automated Tag-Triggered MSI Release Workflow (2026-11-23)
+
+**Status: ✅ VERIFIED**
+
+Implements the automated release packaging pipeline triggered by git version tags (`v*.*.*`), publishing the standalone Windows MSI package (`Serpy-<version>.msi`) and cryptographic checksums (`SHA256SUMS.txt`) to GitHub Releases.
+
+### Implemented Components
+
+1. **`.github/workflows/release.yml`**:
+   - Triggered on tag push `v*` with concurrency lock per tag ref (`cancel-in-progress: false`).
+   - Runs on `windows-latest` with `contents: write` permission.
+   - Builds `Serpy.App` Native-AOT x64 with bundled provisioning assets and bootstrapper `Serpy.InstallerBootstrapper`.
+   - Embeds harvested Microsoft .NET 10 runtime payload into MSI under `C:\Program Files\dotnet` (KD_MSI1).
+   - Conditionally integrates runtime descriptor signing (`DESCRIPTOR_SIGNING_KEY`), trust anchor embedding (`DESCRIPTOR_TRUST_KEY`), and Authenticode code signing (`SIGNING_CERT_PFX_BASE64`, `SIGNING_CERT_PASSWORD`).
+   - Cleans up intermediate downloads, generates `dist/SHA256SUMS.txt`, uploads 30-day workflow artifact `serpy-release-msi`, and creates public GitHub Release via `gh release create` (with `--prerelease` for prerelease tags).
+
+2. **`eng/installer/resolve-release-version.ps1`**:
+   - Parses git tags (`[refs/tags/]v?major.minor.build[-prerelease]`).
+   - Enforces Windows Installer integer limits: `major <= 255`, `minor <= 255`, `build <= 65535` with overflow guard.
+   - Automatically sets `is_prerelease` flag when prerelease suffix is present.
+   - Emits step outputs (`product_version`, `release_tag`, `is_prerelease`, `msi_filename`) to `$env:GITHUB_OUTPUT` and PSCustomObject locally.
+
+3. **`eng/installer/prepare-release-signing.ps1`**:
+   - Inspects signing secrets in environment.
+   - Uses process-isolated temp dir (`$env:RUNNER_TEMP\signing` or `%TEMP%\serpy-signing\<guid>`) strictly outside repository and publish workspaces to prevent leaking sensitive keys into harvested MSI packages.
+   - Generates and self-verifies `dist/runtime-descriptor.signed.json` via `new-signed-descriptor.ps1` when signing key is present, securely wiping temporary private key PEM immediately after generation.
+   - Configures `/p:SerpyDescriptorTrustKey` and `/p:SerpyReleasePublish=true` when trust key is present.
+   - Decodes Authenticode PFX and password to temp path when present.
+   - Degrades gracefully with informational diagnostic notices to `-AllowMissingDescriptor` when secrets are absent.
+
+4. **`docs/release-process.md`**: Complete operational guide for cutting releases, required secrets, and local diagnostic testing.
+
+### Verification Matrix
+
+| Target / Scenario | Test Input / Check | Result |
+|---|---|---|
+| Standard version tag | `resolve-release-version.ps1 -Tag "v1.0.0"` | ✅ `ProductVersion=1.0.0`, `IsPrerelease=False`, `MsiFilename=Serpy-1.0.0.msi` |
+| Bare version tag | `resolve-release-version.ps1 -Tag "2.3.4"` | ✅ `ProductVersion=2.3.4`, `IsPrerelease=False`, `MsiFilename=Serpy-2.3.4.msi` |
+| Prerelease tag | `resolve-release-version.ps1 -Tag "v1.2.3-rc.1"` | ✅ `ProductVersion=1.2.3`, `IsPrerelease=True`, `MsiFilename=Serpy-1.2.3.msi` |
+| Git ref tag | `resolve-release-version.ps1 -Tag "refs/tags/v1.0.0"` | ✅ `ProductVersion=1.0.0`, `ReleaseTag=v1.0.0`, `IsPrerelease=False` |
+| Incomplete tag | `resolve-release-version.ps1 -Tag "v1.0"` | ✅ Terminating error: malformed format |
+| Non-numeric tag | `resolve-release-version.ps1 -Tag "release-candidate"` | ✅ Terminating error: malformed format |
+| Major bounds overflow | `resolve-release-version.ps1 -Tag "v300.1.0"` | ✅ Terminating error: major version > 255 |
+| Minor bounds overflow | `resolve-release-version.ps1 -Tag "v1.300.0"` | ✅ Terminating error: minor version > 255 |
+| Build bounds overflow | `resolve-release-version.ps1 -Tag "v1.0.70000"` | ✅ Terminating error: build version > 65535 |
+| 64-bit int overflow | `resolve-release-version.ps1 -Tag "v999999999999999999999999999999.0.0"` | ✅ Terminating error: bounds check catches safely |
+| Unsigned dev fallback | `prepare-release-signing.ps1` (no secrets) | ✅ `allow_missing_descriptor=true`, diagnostic warning logged |
+| Descriptor signing | `prepare-release-signing.ps1` with test PEM + SPKI | ✅ Descriptor signed & verified against compiled-in trust anchor |
+| Corrupted PEM key | `prepare-release-signing.ps1` with invalid PEM | ✅ Terminating error: fails fast before build/packaging |
+| Workflow YAML schema | `.github/workflows/release.yml` | ✅ Valid YAML, all 16 pipeline steps verified in sequence |

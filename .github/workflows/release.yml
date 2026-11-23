@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    name: Publish Release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve release version
+        id: version
+        run: ./eng/installer/resolve-release-version.ps1
+
+      - name: Prepare signing
+        id: signing
+        env:
+          DESCRIPTOR_SIGNING_KEY: ${{ secrets.DESCRIPTOR_SIGNING_KEY }}
+          DESCRIPTOR_TRUST_KEY: ${{ secrets.DESCRIPTOR_TRUST_KEY }}
+          SIGNING_CERT_PFX_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: ./eng/installer/prepare-release-signing.ps1
+
+      - name: Restore Native-AOT runtime pack
+        run: dotnet restore src/Serpy.App/Serpy.App.csproj -r win-x64 /p:PublishAot=true
+
+      - name: Publish Serpy.App (Windows x64, Native-AOT)
+        run: |
+          $extraArgs = @()
+          if ('${{ steps.signing.outputs.extra_msbuild_args }}') {
+            $extraArgs = '${{ steps.signing.outputs.extra_msbuild_args }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          }
+          dotnet publish src/Serpy.App/Serpy.App.csproj `
+            -c Release -r win-x64 --no-restore `
+            /p:PublishAot=true `
+            /p:SelfContained=true `
+            /p:Version=${{ steps.version.outputs.product_version }} `
+            @extraArgs `
+            -o publish/win-x64
+
+      - name: Assert Native-AOT executable and provisioning assets
+        run: |
+          $required = @(
+            'publish/win-x64/Serpy.App.exe',
+            'publish/win-x64/config/versions.yaml',
+            'publish/win-x64/cloud-init/user-data',
+            'publish/win-x64/cloud-init/meta-data',
+            'publish/win-x64/guest/init-data.sh',
+            'publish/win-x64/guest/recover.sh',
+            'publish/win-x64/guest/provision.sh'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "Missing Native-AOT publish output: $($missing -join ', ')" }
+
+      - name: Publish Serpy.InstallerBootstrapper
+        run: |
+          dotnet publish src/Serpy.InstallerBootstrapper/Serpy.InstallerBootstrapper.csproj `
+            -c Release -r win-x64 --self-contained false `
+            /p:Version=${{ steps.version.outputs.product_version }} `
+            -o publish/bootstrapper-win-x64
+
+      - name: Assert bootstrapper executable
+        run: |
+          if (-not (Test-Path 'publish/bootstrapper-win-x64/Serpy.InstallerBootstrapper.exe')) {
+            throw 'Missing Serpy.InstallerBootstrapper.exe from publish output.'
+          }
+
+      - name: Install WiX v5
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add WixToolset.Util.wixext/5.0.2
+          wix extension add WixToolset.UI.wixext/5.0.2
+
+      - name: Download pinned .NET runtime zip for MSI embedding
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/dotnet-runtime | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.15/dotnet-runtime-10.0.15-win-x64.zip" `
+            -OutFile "dist/dotnet-runtime/dotnet-runtime-10.0.15-win-x64.zip"
+
+      - name: Build Serpy MSI
+        run: |
+          $buildArgs = @{
+            AppPublishDir = 'publish/win-x64'
+            BootstrapperPublishDir = 'publish/bootstrapper-win-x64'
+            OutputPath = 'dist/${{ steps.version.outputs.msi_filename }}'
+            Version = '${{ steps.version.outputs.product_version }}'
+            DotNetRuntimeZipPath = 'dist/dotnet-runtime/dotnet-runtime-10.0.15-win-x64.zip'
+          }
+          if ('${{ steps.signing.outputs.descriptor_path }}') {
+            $buildArgs['DescriptorPath'] = '${{ steps.signing.outputs.descriptor_path }}'
+          }
+          if ('${{ steps.signing.outputs.allow_missing_descriptor }}' -eq 'true') {
+            $buildArgs['AllowMissingDescriptor'] = $true
+          }
+          if ('${{ steps.signing.outputs.signing_cert_pfx }}') {
+            $buildArgs['SigningCertPfx'] = '${{ steps.signing.outputs.signing_cert_pfx }}'
+            if ('${{ steps.signing.outputs.signing_cert_password_path }}') {
+              $buildArgs['SigningCertPasswordPath'] = '${{ steps.signing.outputs.signing_cert_password_path }}'
+            }
+          }
+          ./eng/installer/build-msi.ps1 @buildArgs
+
+      - name: Clean up intermediate runtime download
+        run: |
+          Remove-Item -LiteralPath dist/dotnet-runtime -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Generate SHA256SUMS
+        run: |
+          $msiPath = "dist/${{ steps.version.outputs.msi_filename }}"
+          $hash = (Get-FileHash -LiteralPath $msiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $filename = Split-Path -Leaf $msiPath
+          "$hash  $filename" | Set-Content -LiteralPath "dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: serpy-release-msi
+          path: dist/
+          retention-days: 30
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releaseArgs = @(
+            'release', 'create',
+            '${{ steps.version.outputs.release_tag }}',
+            'dist/${{ steps.version.outputs.msi_filename }}',
+            'dist/SHA256SUMS.txt',
+            '--title', 'Serpy ${{ steps.version.outputs.release_tag }}',
+            '--generate-notes'
+          )
+          if ('${{ steps.version.outputs.is_prerelease }}' -eq 'true') {
+            $releaseArgs += '--prerelease'
+          }
+          gh @releaseArgs
