@@ -67,13 +67,15 @@ When triggered, the release workflow performs the following automated steps:
 
 Serpy supports end-to-end cryptographic integrity verification:
 
-| Repository Secret | Purpose | Format |
+| Repository Secret / Variable | Purpose | Format |
 |---|---|---|
 | `DESCRIPTOR_SIGNING_KEY` | RSA private key used to sign the QEMU runtime descriptor (`dist/runtime-descriptor.signed.json`). | PEM format (`-----BEGIN RSA PRIVATE KEY-----` or `-----BEGIN PRIVATE KEY-----`). |
 | `DESCRIPTOR_TRUST_KEY` | Matching RSA public key trust anchor embedded into Serpy assemblies at build time via `/p:SerpyDescriptorTrustKey`. | Base64-encoded SubjectPublicKeyInfo (SPKI). |
+| `HELPER_PUBLISHER_SUBJECT` | Expected Authenticode subject of `Serpy.InstallerBootstrapper.exe` embedded into Serpy assemblies at build time via `/p:SerpyHelperPublisherSubject`. Can be set as either a repository secret or repository variable. | Plaintext string (e.g. `CN=Serpy Publisher, O=Serpy, C=US`). |
 | `SIGNING_CERT_PFX_BASE64` | Authenticode certificate used to digitally sign `Serpy.App.exe`, `Serpy.InstallerBootstrapper.exe`, and the output `.msi`. | Base64 string of `.pfx` file bytes. |
 | `SIGNING_CERT_PASSWORD` | Password for decrypting the Authenticode `.pfx` certificate. | Plaintext string secret. |
 
+Both `DESCRIPTOR_TRUST_KEY` and `HELPER_PUBLISHER_SUBJECT` are required to activate `/p:SerpyReleasePublish=true`. If only `DESCRIPTOR_TRUST_KEY` is provided without `HELPER_PUBLISHER_SUBJECT`, the build pipeline logs a warning and omits `SerpyReleasePublish=true` to prevent MSBuild compile-time enforcement failure (`RequireReleaseHelperPublisherSubject`).
 ### Process-Isolated Secret Handling
 
 Sensitive cryptographic material is handled securely:

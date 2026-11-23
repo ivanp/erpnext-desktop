@@ -5,10 +5,10 @@
 
 .DESCRIPTION
     Inspects signing environment variables (DESCRIPTOR_SIGNING_KEY,
-    DESCRIPTOR_TRUST_KEY, SIGNING_CERT_PFX_BASE64, SIGNING_CERT_PASSWORD).
-    If signing secrets are provided, decodes them into a process-isolated
-    temporary directory strictly outside the repository workspace, generates
-    dist/runtime-descriptor.signed.json using new-signed-descriptor.ps1,
+    DESCRIPTOR_TRUST_KEY, HELPER_PUBLISHER_SUBJECT, SIGNING_CERT_PFX_BASE64,
+    SIGNING_CERT_PASSWORD). If signing secrets are provided, decodes them into a
+    process-isolated temporary directory strictly outside the repository workspace,
+    generates dist/runtime-descriptor.signed.json using new-signed-descriptor.ps1,
     and configures MSBuild trust properties. If secrets are absent, falls
     back gracefully to -AllowMissingDescriptor for unsigned dev/staging runs.
 #>
@@ -16,6 +16,7 @@
 param(
     [string]$DescriptorSigningKey = $env:DESCRIPTOR_SIGNING_KEY,
     [string]$DescriptorTrustKey = $env:DESCRIPTOR_TRUST_KEY,
+    [string]$HelperPublisherSubject = $env:HELPER_PUBLISHER_SUBJECT,
     [string]$SigningCertPfxBase64 = $env:SIGNING_CERT_PFX_BASE64,
     [string]$SigningCertPassword = $env:SIGNING_CERT_PASSWORD,
     [string]$VersionsYamlPath,
@@ -88,14 +89,25 @@ if (-not [string]::IsNullOrWhiteSpace($DescriptorSigningKey)) {
 }
 
 # 2. Production Trust Anchor MSBuild Properties
-if (-not [string]::IsNullOrWhiteSpace($DescriptorTrustKey)) {
-    Write-Host "DESCRIPTOR_TRUST_KEY detected. Configuring production trust key for MSBuild."
-    $trimmedTrustKey = $DescriptorTrustKey.Trim()
-    $extraMsbuildArgs = "/p:SerpyDescriptorTrustKey=$trimmedTrustKey /p:SerpyReleasePublish=true"
-} else {
-    Write-Host "DESCRIPTOR_TRUST_KEY is not set. MSBuild will use default/local trust key if available."
-}
+$hasTrustKey = -not [string]::IsNullOrWhiteSpace($DescriptorTrustKey)
+$hasHelperSubject = -not [string]::IsNullOrWhiteSpace($HelperPublisherSubject)
 
+if ($hasTrustKey -and $hasHelperSubject) {
+    Write-Host "Both DESCRIPTOR_TRUST_KEY and HELPER_PUBLISHER_SUBJECT detected. Configuring production trust properties and enabling SerpyReleasePublish."
+    $trimmedTrust = $DescriptorTrustKey.Trim()
+    $trimmedSubject = $HelperPublisherSubject.Trim()
+    $extraMsbuildArgs = "/p:SerpyDescriptorTrustKey=$trimmedTrust /p:SerpyHelperPublisherSubject=`"$trimmedSubject`" /p:SerpyReleasePublish=true"
+} elseif ($hasTrustKey) {
+    Write-Warning "DESCRIPTOR_TRUST_KEY is set but HELPER_PUBLISHER_SUBJECT is not set. HELPER_PUBLISHER_SUBJECT is also required for SerpyReleasePublish=true. Supplying SerpyDescriptorTrustKey without SerpyReleasePublish=true to prevent compile errors."
+    $trimmedTrust = $DescriptorTrustKey.Trim()
+    $extraMsbuildArgs = "/p:SerpyDescriptorTrustKey=$trimmedTrust"
+} elseif ($hasHelperSubject) {
+    Write-Host "HELPER_PUBLISHER_SUBJECT detected without DESCRIPTOR_TRUST_KEY. Configuring SerpyHelperPublisherSubject."
+    $trimmedSubject = $HelperPublisherSubject.Trim()
+    $extraMsbuildArgs = "/p:SerpyHelperPublisherSubject=`"$trimmedSubject`""
+} else {
+    Write-Host "Neither DESCRIPTOR_TRUST_KEY nor HELPER_PUBLISHER_SUBJECT is set. MSBuild will use default/local trust anchors if available."
+}
 # 3. Authenticode Code Signing Certificate
 if (-not [string]::IsNullOrWhiteSpace($SigningCertPfxBase64)) {
     Write-Host "SIGNING_CERT_PFX_BASE64 detected. Preparing Authenticode signing certificate..."

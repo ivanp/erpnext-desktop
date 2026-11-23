@@ -38,6 +38,7 @@ jobs:
         env:
           DESCRIPTOR_SIGNING_KEY: ${{ secrets.DESCRIPTOR_SIGNING_KEY }}
           DESCRIPTOR_TRUST_KEY: ${{ secrets.DESCRIPTOR_TRUST_KEY }}
+          HELPER_PUBLISHER_SUBJECT: ${{ secrets.HELPER_PUBLISHER_SUBJECT || vars.HELPER_PUBLISHER_SUBJECT }}
           SIGNING_CERT_PFX_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
           SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
         run: ./eng/installer/prepare-release-signing.ps1
