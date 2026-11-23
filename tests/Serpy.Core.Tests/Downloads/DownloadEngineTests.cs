@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using Serpy.Core.Contracts;
@@ -485,6 +486,618 @@ public sealed class DownloadEngineTests : IDisposable
 
         Assert.True(File.Exists(_cache.GetPath(file1.Key)));
         Assert.False(File.Exists(_cache.GetPartPath(file2.Key)));
+    }
+
+    [Fact]
+    public async Task StalledBodyRead_TimesOutAndRetriesSuccessfully()
+    {
+        var (file, payload) = CreateFile("retry-stall.whl", "https://files.pythonhosted.org/retry-stall.whl", "full-wheel-content-here");
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "python-wheels", Title = "Python Wheels", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var partPath = _cache.GetPartPath(file.Key);
+
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                var initialBytes = payload.Take(5).ToArray();
+                var stallingStream = new StallingStream(initialBytes, stallAfterInitial: true);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stallingStream) });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        });
+
+        var engine = new DownloadEngine(
+            inputs,
+            _cache,
+            handler,
+            delay: (_, _) => Task.CompletedTask,
+            stallTimeout: TimeSpan.FromMilliseconds(150));
+
+        await engine.DownloadPartsAsync();
+
+        Assert.Equal(2, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(partPath), "Stalled attempt's .part file must be cleaned up");
+    }
+
+    [Fact]
+    public async Task AllAttemptsStall_ThrowsNetworkUnavailableWithoutHanging()
+    {
+        var file = new InputFile
+        {
+            Key = "stalling-wheel.whl",
+            Path = "guest/stalling-wheel.whl",
+            Size = 100,
+            Sha256 = new string('0', 64),
+            Urls = ["https://files.pythonhosted.org/stalling-wheel.whl", "https://fallback.pythonhosted.org/stalling-wheel.whl"],
+            InGuest = true
+        };
+
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "wheels", Title = "Wheels", Files = [file] }]
+        };
+
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            var initialBytes = new byte[] { 1, 2, 3, 4 };
+            var stallingStream = new StallingStream(initialBytes, stallAfterInitial: true);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stallingStream) });
+        });
+
+        var engine = new DownloadEngine(
+            inputs,
+            _cache,
+            handler,
+            delay: (_, _) => Task.CompletedTask,
+            stallTimeout: TimeSpan.FromMilliseconds(50));
+
+        using var safetyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var ex = await Assert.ThrowsAsync<DownloadException>(() => engine.DownloadPartsAsync(ct: safetyCts.Token));
+
+        Assert.Equal(FailureCode.NetworkUnavailable, ex.Code);
+        Assert.Equal("wheels", ex.PartId);
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task SlowButProgressingStream_DoesNotTriggerStallTimeout()
+    {
+        var (file, payload) = CreateFile("slow-wheel.whl", "https://files.pythonhosted.org/slow-wheel.whl", "slow-stream-payload-data");
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "slow-part", Title = "Slow Part", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            attempts++;
+            var slowStream = new SlowChunkStream(payload, chunkSize: Math.Max(1, payload.Length / 4), delayPerChunk: TimeSpan.FromMilliseconds(50));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(slowStream) });
+        });
+
+        var engine = new DownloadEngine(
+            inputs,
+            _cache,
+            handler,
+            delay: (_, _) => Task.CompletedTask,
+            stallTimeout: TimeSpan.FromMilliseconds(100));
+
+        await engine.DownloadPartsAsync();
+
+        Assert.Equal(1, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task PrematureResponseEnd_RetriesAndSucceeds()
+    {
+        var (file, payload) = CreateFile("uv-wheel.whl", "https://files.pythonhosted.org/uv-wheel.whl", "full-uv-wheel-content-here");
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "uv-part", Title = "UV Wheel", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var partPath = _cache.GetPartPath(file.Key);
+
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                var initialBytes = payload.Take(5).ToArray();
+                var stream = new PrematureEndedStream(initialBytes, new IOException("The response ended prematurely, with at least 34456 additional bytes expected."));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        });
+
+        var engine = new DownloadEngine(
+            inputs,
+            _cache,
+            handler,
+            delay: (_, _) => Task.CompletedTask);
+
+        await engine.DownloadPartsAsync();
+
+        Assert.Equal(2, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(partPath), "Partial .part file must be cleaned up");
+    }
+
+    [Fact]
+    public async Task PrematureResponseEnd_AllAttemptsFail_ThrowsNetworkUnavailable()
+    {
+        var file = new InputFile
+        {
+            Key = "uv-failing.whl",
+            Path = "guest/uv-failing.whl",
+            Size = 100,
+            Sha256 = new string('0', 64),
+            Urls = ["https://files.pythonhosted.org/uv-failing.whl", "https://fallback.pythonhosted.org/uv-failing.whl"],
+            InGuest = true
+        };
+
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "uv-failing-part", Title = "UV Failing Part", Files = [file] }]
+        };
+
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            var initialBytes = new byte[] { 1, 2, 3, 4 };
+            var stream = new PrematureEndedStream(initialBytes, new IOException("The response ended prematurely, with at least 34456 additional bytes expected."));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+        });
+
+        var engine = new DownloadEngine(
+            inputs,
+            _cache,
+            handler,
+            delay: (_, _) => Task.CompletedTask);
+
+        using var safetyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var ex = await Assert.ThrowsAsync<DownloadException>(() => engine.DownloadPartsAsync(ct: safetyCts.Token));
+
+        Assert.Equal(FailureCode.NetworkUnavailable, ex.Code);
+        Assert.Equal("uv-failing-part", ex.PartId);
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task ResumesPartialDownload_WhenConnectionClosesMidStream()
+    {
+        var (file, payload) = CreateFile("partial.deb", "https://deb.debian.org/partial.deb", new string('A', 100));
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((req, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                Assert.Null(req.Headers.Range);
+                var stream = new CutAfterKBytesStream(payload, offset: 0, bytesToServe: 40, new IOException("Premature EOF"));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+            }
+
+            Assert.NotNull(req.Headers.Range);
+            Assert.Equal(40, req.Headers.Range.Ranges.First().From);
+
+            var remaining = payload[40..];
+            var resp = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(remaining) };
+            resp.Content.Headers.ContentRange = new ContentRangeHeaderValue(40, 99, 100);
+            return Task.FromResult(resp);
+        });
+
+        var snapshots = new List<PartDownloadSnapshot>();
+        var progress = new SyncProgress<PartDownloadSnapshot>(s => { lock (snapshots) snapshots.Add(s); });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        await engine.DownloadPartsAsync(progress: progress);
+
+        Assert.Equal(2, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+
+        var downloadingSnapshots = snapshots.Where(s => s.State == PartDownloadState.Downloading).ToList();
+        Assert.NotEmpty(downloadingSnapshots);
+        Assert.All(downloadingSnapshots, s => Assert.True(s.Bytes <= 100));
+        Assert.Equal(100, downloadingSnapshots.Last().Bytes);
+    }
+
+    [Fact]
+    public async Task ServerIgnoresRange_RestartsFromZeroCleanly()
+    {
+        var (file, payload) = CreateFile("ignore-range.deb", "https://deb.debian.org/ignore-range.deb", new string('B', 100));
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((req, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                Assert.Null(req.Headers.Range);
+                var stream = new CutAfterKBytesStream(payload, offset: 0, bytesToServe: 40, new IOException("Premature EOF"));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+            }
+
+            Assert.NotNull(req.Headers.Range);
+            Assert.Equal(40, req.Headers.Range.Ranges.First().From);
+
+            // Server ignores Range header and serves full 200 OK
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        });
+
+        var snapshots = new List<PartDownloadSnapshot>();
+        var progress = new SyncProgress<PartDownloadSnapshot>(s => { lock (snapshots) snapshots.Add(s); });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        await engine.DownloadPartsAsync(progress: progress);
+
+        Assert.Equal(2, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+
+        var downloadingSnapshots = snapshots.Where(s => s.State == PartDownloadState.Downloading).ToList();
+        Assert.NotEmpty(downloadingSnapshots);
+        Assert.All(downloadingSnapshots, s => Assert.True(s.Bytes <= 100));
+        Assert.Equal(100, downloadingSnapshots.Last().Bytes);
+    }
+
+    [Fact]
+    public async Task ServerReturnsUnacceptableContentRange_RestartsFromZeroAndSucceeds()
+    {
+        var (file, payload) = CreateFile("bad-range.deb", "https://deb.debian.org/bad-range.deb", new string('C', 100));
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((req, _) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                var stream = new CutAfterKBytesStream(payload, offset: 0, bytesToServe: 40, new IOException("Premature EOF"));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+            }
+
+            if (attempts == 2)
+            {
+                Assert.NotNull(req.Headers.Range);
+                Assert.Equal(40, req.Headers.Range.Ranges.First().From);
+                // Returns 206 with wrong Content-Range start (0 instead of 40)
+                var resp = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(payload) };
+                resp.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, 99, 100);
+                return Task.FromResult(resp);
+            }
+
+            // Attempt 3 must start fresh from 0 without Range header because bad range deleted the .part
+            Assert.Null(req.Headers.Range);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        await engine.DownloadPartsAsync();
+
+        Assert.Equal(3, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task CutAfterKBytes_CompletesViaProgressiveResumesWithoutBudgetExhaustion()
+    {
+        var (file, payload) = CreateFile("chunked.deb", "https://deb.debian.org/chunked.deb", new string('D', 20));
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((req, _) =>
+        {
+            attempts++;
+            var from = (int)(req.Headers.Range?.Ranges.FirstOrDefault()?.From ?? 0);
+            var stream = new CutAfterKBytesStream(payload, offset: from, bytesToServe: 5, new IOException("Cut mid-stream"));
+            if (from == 0)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+            }
+
+            var resp = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new StreamContent(stream) };
+            resp.Content.Headers.ContentRange = new ContentRangeHeaderValue(from, 19, 20);
+            return Task.FromResult(resp);
+        });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        await engine.DownloadPartsAsync();
+
+        // 20 bytes served 5 at a time = 4 attempts (0-4, 5-9, 10-14, 15-19), exceeding maxRetries = 3
+        Assert.Equal(4, attempts);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task ZeroProgressFailures_ExhaustRetryBudget()
+    {
+        var file = new InputFile
+        {
+            Key = "zero.deb",
+            Path = "guest/zero.deb",
+            Size = 100,
+            Sha256 = new string('0', 64),
+            Urls = ["https://deb.debian.org/zero.deb"],
+            InGuest = true
+        };
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            attempts++;
+            throw new HttpRequestException("Immediate connection reset");
+        });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+
+        var ex = await Assert.ThrowsAsync<DownloadException>(() => engine.DownloadPartsAsync());
+        Assert.Equal(FailureCode.NetworkUnavailable, ex.Code);
+        Assert.Equal(4, attempts); // initial attempt + 3 retries
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    [Fact]
+    public async Task FallbackToNextUrl_CleansUpPartFileAndStartsWithoutRange()
+    {
+        var (file, payload) = CreateFile("fallback.deb", "https://deb1.debian.org/fallback.deb", "fallback-success-payload");
+        file.Urls = ["https://deb1.debian.org/fallback.deb", "https://deb2.debian.org/fallback.deb"];
+
+        var inputs = new BuildInputs
+        {
+            SchemaVersion = 1,
+            Versions = new ApplianceVersions(),
+            Parts = [new InputPart { Id = "p1", Title = "P1", Files = [file] }]
+        };
+
+        var attemptsUrl1 = 0;
+        var attemptsUrl2 = 0;
+        var handler = new MockHttpMessageHandler((req, _) =>
+        {
+            if (req.RequestUri!.Host == "deb1.debian.org")
+            {
+                attemptsUrl1++;
+                throw new HttpRequestException("URL1 network down");
+            }
+
+            attemptsUrl2++;
+            Assert.Null(req.Headers.Range);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        });
+
+        var engine = new DownloadEngine(inputs, _cache, handler, delay: (_, _) => Task.CompletedTask);
+        await engine.DownloadPartsAsync();
+
+        Assert.Equal(4, attemptsUrl1);
+        Assert.Equal(1, attemptsUrl2);
+        Assert.True(File.Exists(_cache.GetPath(file.Key)));
+        Assert.Equal(payload, await File.ReadAllBytesAsync(_cache.GetPath(file.Key)));
+        Assert.False(File.Exists(_cache.GetPartPath(file.Key)));
+    }
+
+    private sealed class CutAfterKBytesStream(byte[] fullData, int offset, int bytesToServe, Exception exceptionToThrow) : Stream
+    {
+        private int _served;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var remaining = fullData.Length - (offset + _served);
+            if (remaining <= 0)
+            {
+                return ValueTask.FromResult(0);
+            }
+
+            if (_served >= bytesToServe)
+            {
+                throw exceptionToThrow;
+            }
+
+            var available = Math.Min(bytesToServe - _served, remaining);
+            var toCopy = Math.Min(buffer.Length, available);
+            fullData.AsMemory(offset + _served, toCopy).CopyTo(buffer);
+            _served += toCopy;
+            return ValueTask.FromResult(toCopy);
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => bytesToServe;
+        public override long Position
+        {
+            get => _served;
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class StallingStream(byte[] initialBytes, bool stallAfterInitial = true) : Stream
+    {
+        private int _position;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position < initialBytes.Length)
+            {
+                var toRead = Math.Min(buffer.Length, initialBytes.Length - _position);
+                initialBytes.AsMemory(_position, toRead).CopyTo(buffer);
+                _position += toRead;
+                return toRead;
+            }
+
+            if (stallAfterInitial)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return 0;
+            }
+
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => initialBytes.Length;
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class SlowChunkStream(byte[] data, int chunkSize, TimeSpan delayPerChunk) : Stream
+    {
+        private int _position;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position >= data.Length) return 0;
+
+            await Task.Delay(delayPerChunk, cancellationToken);
+            var toRead = Math.Min(chunkSize, Math.Min(buffer.Length, data.Length - _position));
+            data.AsMemory(_position, toRead).CopyTo(buffer);
+            _position += toRead;
+            return toRead;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class PrematureEndedStream(byte[] initialBytes, Exception exceptionToThrow) : Stream
+    {
+        private int _position;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position < initialBytes.Length)
+            {
+                var toRead = Math.Min(buffer.Length, initialBytes.Length - _position);
+                initialBytes.AsMemory(_position, toRead).CopyTo(buffer);
+                _position += toRead;
+                return ValueTask.FromResult(toRead);
+            }
+
+            throw exceptionToThrow;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => initialBytes.Length + 1000;
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class MockHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)

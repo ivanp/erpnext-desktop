@@ -11,8 +11,45 @@ namespace Serpy.Core.Platform.Windows;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsPcProbe : IPcProbe
 {
-    private static readonly TimeSpan HostTimeout = TimeSpan.FromSeconds(8);
+    /// <summary>
+    /// Default escalating timeouts for probe attempts per host.
+    /// In Hyper-V VM environments (e.g. Default Switch NAT), guest hosts may publish both IPv4 (A)
+    /// and IPv6 (AAAA) DNS records while the NAT interface lacks an external IPv6 route. The initial
+    /// connection attempt to dual-stack mirrors such as archive.mariadb.org can incur an OS-level
+    /// connect/fallback delay before Windows falls back to IPv4. Retrying up to 2 additional times
+    /// with escalating timeouts (8 s, 12 s, 15 s) absorbs transient first-connection DNS/connect
+    /// delays without requiring unsafe socket-level address ordering hacks.
+    /// </summary>
+    public static readonly IReadOnlyList<TimeSpan> DefaultAttemptTimeouts =
+    [
+        TimeSpan.FromSeconds(8),
+        TimeSpan.FromSeconds(12),
+        TimeSpan.FromSeconds(15)
+    ];
 
+    public static readonly TimeSpan DefaultRetryDelay = TimeSpan.FromSeconds(1);
+
+    private readonly HttpMessageHandler? _httpHandler;
+    private readonly IReadOnlyList<TimeSpan> _attemptTimeouts;
+    private readonly TimeSpan _retryDelay;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+
+    public WindowsPcProbe()
+        : this(null, null, null, null)
+    {
+    }
+
+    public WindowsPcProbe(
+        HttpMessageHandler? httpHandler = null,
+        IReadOnlyList<TimeSpan>? attemptTimeouts = null,
+        TimeSpan? retryDelay = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        _httpHandler = httpHandler;
+        _attemptTimeouts = attemptTimeouts is { Count: > 0 } ? attemptTimeouts : DefaultAttemptTimeouts;
+        _retryDelay = retryDelay ?? DefaultRetryDelay;
+        _delay = delay ?? Task.Delay;
+    }
     // PF_VIRT_FIRMWARE_ENABLED. It reports the firmware flag, and it reads false while a hypervisor
     // runs, which is why the evaluator reads it only without one. Measured on the reference PC: false
     // with a hypervisor running, the same as WMI Win32_Processor.VirtualizationFirmwareEnabled.
@@ -73,26 +110,52 @@ public sealed class WindowsPcProbe : IPcProbe
         catch (EntryPointNotFoundException) { return null; }
     }
 
-    private static async Task<IReadOnlyList<HostReachability>> ReachAsync(IReadOnlyList<Uri> uris, CancellationToken ct)
+    internal async Task<IReadOnlyList<HostReachability>> ReachAsync(IReadOnlyList<Uri> uris, CancellationToken ct)
     {
-        using var http = new HttpClient { Timeout = HostTimeout };
+        using var http = _httpHandler is null
+            ? new HttpClient()
+            : new HttpClient(_httpHandler, disposeHandler: false);
+        http.Timeout = Timeout.InfiniteTimeSpan;
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Serpy-PcCheck/1.0");
+
         var tasks = uris.Select(u => u.Host).Distinct(StringComparer.OrdinalIgnoreCase).Select(async host =>
         {
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Head, $"https://{host}/");
-                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
-                    .ConfigureAwait(false);
-                // Any answer proves the site is reachable, even an error page.
-                return new HostReachability(host, true);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            for (var attempt = 0; attempt < _attemptTimeouts.Count; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
-                return new HostReachability(host, false);
+
+                if (attempt > 0)
+                {
+                    await _delay(_retryDelay, ct).ConfigureAwait(false);
+                }
+
+                var timeout = _attemptTimeouts[attempt];
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                attemptCts.CancelAfter(timeout);
+
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Head, $"https://{host}/");
+                    using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token)
+                        .ConfigureAwait(false);
+                    // Any answer proves the site is reachable, even an error page.
+                    return new HostReachability(host, true);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Attempt timed out; fall through to retry
+                }
+                catch (HttpRequestException)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    // Connection reset, DNS failure, or transport error; fall through to retry
+                }
             }
+
+            ct.ThrowIfCancellationRequested();
+            return new HostReachability(host, false);
         });
+
         return await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 

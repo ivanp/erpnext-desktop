@@ -36,12 +36,29 @@ public sealed class DownloadEngine
     private const int MaxSnapshotConcurrentDownloads = 2;
     private const string SnapshotHost = "snapshot.debian.org";
 
+    /// <summary>
+    /// Upper bound on resumed attempts per file. Each attempt that receives at least one new byte
+    /// (forward progress) does not consume the retry budget, so a server that cuts the connection
+    /// after a fixed number of bytes can still finish a large file by resuming; this cap prevents an
+    /// infinite loop if a server keeps returning tiny or empty 206 responses forever.
+    /// </summary>
+    private const int MaxResumedAttemptsPerFile = 50;
+    /// <summary>
+    /// Default inactivity timeout in seconds during stream body read. If no bytes arrive within this duration,
+    /// the read is aborted as stalled so the engine can retry or fall back to an alternate URL.
+    /// In clean-install VM environments, stalled TCP connections to wheel/package hosts otherwise
+    /// hang indefinitely because HttpClient.Timeout only covers the header phase under ResponseHeadersRead.
+    /// </summary>
+    public const int DefaultStallTimeoutSeconds = 60;
+
+    public static readonly TimeSpan DefaultStallTimeout = TimeSpan.FromSeconds(DefaultStallTimeoutSeconds);
+
     private readonly BuildInputs _inputs;
     private readonly DownloadCache _cache;
     private readonly HttpMessageHandler? _httpHandler;
     private readonly Func<DateTimeOffset> _clock;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
-
+    private readonly TimeSpan _stallTimeout;
     private readonly SemaphoreSlim _overallThrottle = new(MaxOverallConcurrentDownloads, MaxOverallConcurrentDownloads);
     private readonly SemaphoreSlim _snapshotThrottle = new(MaxSnapshotConcurrentDownloads, MaxSnapshotConcurrentDownloads);
 
@@ -50,18 +67,22 @@ public sealed class DownloadEngine
     public DownloadCache Cache => _cache;
     public BuildInputs Inputs => _inputs;
 
+    public TimeSpan StallTimeout => _stallTimeout;
+
     public DownloadEngine(
         BuildInputs inputs,
         DownloadCache cache,
         HttpMessageHandler? httpHandler = null,
         Func<DateTimeOffset>? clock = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeSpan? stallTimeout = null)
     {
         _inputs = inputs;
         _cache = cache;
         _httpHandler = httpHandler;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _delay = delay ?? Task.Delay;
+        _stallTimeout = stallTimeout ?? DefaultStallTimeout;
     }
 
     public IReadOnlyList<PartDownloadSnapshot> GetSnapshots() =>
@@ -164,7 +185,7 @@ public sealed class DownloadEngine
                     {
                         lock (partProgressLock)
                         {
-                            var currentBytes = partBytesMap.AddOrUpdate(part.Id, bytesDelta, (_, old) => old + bytesDelta);
+                            var currentBytes = partBytesMap.AddOrUpdate(part.Id, Math.Max(0, bytesDelta), (_, old) => Math.Max(0, old + bytesDelta));
                             var snap = new PartDownloadSnapshot(part.Id, PartDownloadState.Downloading, currentBytes, part.Files.Sum(f => f.Size), part.Files.Count, false);
                             _snapshots[part.Id] = snap;
                             progress?.Report(snap);
@@ -241,10 +262,26 @@ public sealed class DownloadEngine
         var targetPath = _cache.GetPath(file.Key);
         var partPath = _cache.GetPartPath(file.Key);
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        DeletePart(partPath);
 
         var urls = file.Urls ?? [];
         if (urls.Count == 0)
             throw new DownloadException(FailureCode.Unknown, $"File '{file.Key}' in part '{part.Id}' has no download URLs.", part.Id);
+
+        var fileBytesReceived = 0L;
+        void ReportBytes(long delta)
+        {
+            fileBytesReceived += delta;
+            onBytesReceived(delta);
+        }
+        void ResetBytes()
+        {
+            if (fileBytesReceived > 0)
+            {
+                onBytesReceived(-fileBytesReceived);
+                fileBytesReceived = 0;
+            }
+        }
 
         var mismatchCount = 0;
 
@@ -259,20 +296,33 @@ public sealed class DownloadEngine
                 var url = urls[urlIndex];
                 try
                 {
-                    await DownloadFromUrlWithRetryAsync(url, partPath, file, onBytesReceived, ct).ConfigureAwait(false);
+                    await DownloadFromUrlWithRetryAsync(url, partPath, file, ReportBytes, ct).ConfigureAwait(false);
                     anyAddressSucceeded = true;
                     break;
                 }
                 catch (HttpResponseException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
                 {
-                    // 404 -> fallback to next address
+                    // 404 -> fallback to next address; a resumed .part belongs to this URL only.
                     lastError = ex;
+                    ResetBytes();
+                    DeletePart(partPath);
                     continue;
                 }
-                catch (Exception ex) when (urlIndex + 1 < urls.Count && (IsNetworkException(ex) || ex is HttpResponseException))
+                catch (Exception ex) when (!ct.IsCancellationRequested && IsDiskFullException(ex))
                 {
-                    // Fallback to next URL
+                    // Disk full: do not retry other URLs, fail immediately
                     lastError = ex;
+                    ResetBytes();
+                    DeletePart(partPath);
+                    break;
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested && (IsNetworkException(ex) || ex is HttpResponseException))
+                {
+                    // Fallback to next URL: a resumed .part belongs to the previous URL's byte
+                    // sequence, so it must never be appended to another server's stream.
+                    lastError = ex;
+                    ResetBytes();
+                    DeletePart(partPath);
                     continue;
                 }
             }
@@ -297,11 +347,9 @@ public sealed class DownloadEngine
             if (!integrityValid)
             {
                 mismatchCount++;
-                if (File.Exists(partPath))
-                {
-                    try { File.Delete(partPath); } catch { }
-                }
-
+                // A corrupt (possibly resumed) file must be refetched from scratch.
+                ResetBytes();
+                DeletePart(partPath);
                 if (mismatchCount >= 2)
                 {
                     if (File.Exists(targetPath))
@@ -328,6 +376,14 @@ public sealed class DownloadEngine
         }
     }
 
+    private static void DeletePart(string partPath)
+    {
+        if (File.Exists(partPath))
+        {
+            try { File.Delete(partPath); } catch { }
+        }
+    }
+
     private async Task DownloadFromUrlWithRetryAsync(
         string url,
         string partPath,
@@ -340,11 +396,18 @@ public sealed class DownloadEngine
 
         var maxRetries = 3;
         var attempt = 0;
+        var noProgressCount = 0;
 
         while (true)
         {
             attempt++;
             ct.ThrowIfCancellationRequested();
+
+            if (attempt > MaxResumedAttemptsPerFile)
+            {
+                throw new HttpRequestException(
+                    $"Download of {url} reached maximum resumed attempts ({MaxResumedAttemptsPerFile}) without completing.");
+            }
 
             await _overallThrottle.WaitAsync(ct).ConfigureAwait(false);
             var snapshotAcquired = false;
@@ -354,9 +417,21 @@ public sealed class DownloadEngine
                 snapshotAcquired = true;
             }
 
+            var resumeFrom = 0L;
+            if (File.Exists(partPath))
+            {
+                var partLength = new FileInfo(partPath).Length;
+                if (partLength > 0 && (file.Size <= 0 || partLength < file.Size))
+                {
+                    resumeFrom = partLength;
+                }
+            }
+
+            var bytesBefore = resumeFrom;
+
             try
             {
-                await StreamToFileAsync(url, partPath, onBytesReceived, ct).ConfigureAwait(false);
+                await StreamToFileAsync(url, partPath, file, onBytesReceived, resumeFrom, ct).ConfigureAwait(false);
                 return;
             }
             catch (HttpResponseException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
@@ -364,15 +439,20 @@ public sealed class DownloadEngine
                 // Do not retry 404 on the same URL; let outer loop fallback to next URL
                 throw;
             }
-            catch (HttpResponseException ex) when (IsRefusal(ex.StatusCode) && attempt <= maxRetries)
+            catch (Exception ex) when (!ct.IsCancellationRequested && (ex is HttpResponseException httpEx && IsRefusal(httpEx.StatusCode) || ex is TaskCanceledException or TimeoutException or HttpRequestException))
             {
-                // Exponential backoff
-                var backoff = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
-                await _delay(backoff, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (attempt <= maxRetries && (ex is TaskCanceledException or TimeoutException or HttpRequestException))
-            {
-                var backoff = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1));
+                var partLengthNow = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
+                if (partLengthNow <= bytesBefore)
+                {
+                    noProgressCount++;
+                }
+
+                if (noProgressCount > maxRetries)
+                {
+                    throw;
+                }
+
+                var backoff = TimeSpan.FromMilliseconds(500 * Math.Pow(2, Math.Min(noProgressCount, maxRetries) - 1));
                 await _delay(backoff, ct).ConfigureAwait(false);
             }
             finally
@@ -380,17 +460,24 @@ public sealed class DownloadEngine
                 if (snapshotAcquired) _snapshotThrottle.Release();
                 _overallThrottle.Release();
             }
+
         }
     }
 
-    private async Task StreamToFileAsync(
+    private async Task<long> StreamToFileAsync(
         string url,
         string partPath,
+        InputFile file,
         Action<long> onBytesReceived,
+        long resumeFrom,
         CancellationToken ct)
     {
         using var client = _httpHandler is null ? new HttpClient() : new HttpClient(_httpHandler, disposeHandler: false);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (resumeFrom > 0)
+        {
+            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(resumeFrom, null);
+        }
 
         HttpResponseMessage response;
         try
@@ -402,33 +489,112 @@ public sealed class DownloadEngine
             throw new TimeoutException($"Timeout downloading {url}");
         }
 
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            throw new HttpResponseException(HttpStatusCode.NotFound, $"404 Not Found: {url}");
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new HttpResponseException(response.StatusCode, $"HTTP {(int)response.StatusCode} {response.StatusCode} from {url}");
-        }
-
         try
         {
-            if (File.Exists(partPath))
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new HttpResponseException(HttpStatusCode.NotFound, $"404 Not Found: {url}");
+            }
+            if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+            {
+                if (resumeFrom > 0)
+                {
+                    onBytesReceived(-resumeFrom);
+                }
+                if (File.Exists(partPath))
+                {
+                    try { File.Delete(partPath); } catch { }
+                }
+                throw new HttpRequestException($"HTTP 416 RequestedRangeNotSatisfiable from {url} resuming from {resumeFrom}");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpResponseException(response.StatusCode, $"HTTP {(int)response.StatusCode} {response.StatusCode} from {url}");
+            }
+
+            // Resume policy (see plan defect 7):
+            // - resumeFrom > 0 and a 206 whose Content-Range starts exactly at the requested offset
+            //   (and whose total matches file.Size when both are known): append to the .part file.
+            // - a 200 to a Range request (server ignores Range): truncate and restart from 0.
+            // - a 206 with a wrong/missing Content-Range start: reject the resume; delete the .part
+            //   and throw HttpRequestException so the next attempt starts fresh from 0.
+            var append = false;
+            if (resumeFrom > 0 && response.StatusCode == HttpStatusCode.PartialContent)
+            {
+                var contentRange = response.Content.Headers.ContentRange;
+                if (contentRange is null
+                    || contentRange.From != resumeFrom
+                    || (contentRange.Length.HasValue && file.Size > 0 && contentRange.Length.Value != file.Size))
+                {
+                    onBytesReceived(-resumeFrom);
+                    if (File.Exists(partPath))
+                    {
+                        try { File.Delete(partPath); } catch { }
+                    }
+                    throw new HttpRequestException(
+                        $"Unacceptable Content-Range from {url} (expected start {resumeFrom})");
+                }
+                append = true;
+            }
+            else if (resumeFrom > 0)
+            {
+                // Server ignored Range and answered 200 (or an unexpected success status): restart from 0.
+                onBytesReceived(-resumeFrom);
+                resumeFrom = 0;
+            }
+
+            if (!append && File.Exists(partPath))
             {
                 try { File.Delete(partPath); } catch { }
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            await using var fileStream = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true);
+            Stream stream;
+            try
+            {
+                stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            }
+            catch (IOException ex) when (!ct.IsCancellationRequested && !IsDiskFullException(ex))
+            {
+                throw new HttpRequestException($"Network stream open error from {url}: {ex.Message}", ex);
+            }
+
+            await using var streamRegistration = stream.ConfigureAwait(false);
+            await using var fileStream = new FileStream(partPath, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true);
 
             var buffer = new byte[65536];
-            int read;
-            while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            long received = 0;
+            while (true)
             {
+                int read;
+                using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    readCts.CancelAfter(_stallTimeout);
+                    try
+                    {
+                        read = await stream.ReadAsync(buffer.AsMemory(), readCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        throw new TimeoutException($"No data received for {_stallTimeout.TotalSeconds}s from {url}");
+                    }
+                    catch (IOException ex) when (!ct.IsCancellationRequested && !IsDiskFullException(ex))
+                    {
+                        throw new HttpRequestException($"Network stream read error from {url}: {ex.Message}", ex);
+                    }
+                }
+
+                if (read == 0)
+                {
+                    break;
+                }
+
                 await fileStream.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
                 onBytesReceived(read);
+                received += read;
             }
+
+            return received;
         }
         catch (IOException ex) when (IsDiskFullException(ex))
         {
@@ -438,8 +604,28 @@ public sealed class DownloadEngine
             }
             throw;
         }
+        catch (HttpResponseException)
+        {
+            // A rejected resume (416 / bad Content-Range) must not leave a stale .part behind:
+            // the next attempt starts from 0, and any previously reported bytes are undone.
+            if (resumeFrom > 0)
+            {
+                onBytesReceived(-resumeFrom);
+            }
+            if (File.Exists(partPath))
+            {
+                try { File.Delete(partPath); } catch { }
+            }
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TimeoutException)
+        {
+            // Transient network failure during read/open: KEEP .part on disk so the next attempt can resume!
+            throw;
+        }
         catch
         {
+            // Non-network failure or cancellation: discard partial file.
             if (File.Exists(partPath))
             {
                 try { File.Delete(partPath); } catch { }
@@ -484,7 +670,7 @@ public sealed class DownloadEngine
 
     private static bool IsNetworkException(Exception ex)
     {
-        return ex is HttpRequestException or System.Net.Sockets.SocketException or WebException;
+        return ex is HttpRequestException or System.Net.Sockets.SocketException or WebException or TimeoutException;
     }
 
     private static bool IsDiskFullException(Exception ex)
