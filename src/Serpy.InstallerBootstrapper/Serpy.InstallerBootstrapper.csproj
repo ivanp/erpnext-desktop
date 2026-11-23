@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- CET shadow stacks cause fatal error on unpatched Windows 10 21H2 LTSC (0x80131506) -->
+    <CETCompat>false</CETCompat>
   </PropertyGroup>
 
   <!--

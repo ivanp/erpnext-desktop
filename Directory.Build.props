@@ -8,8 +8,12 @@
     <PublishAot>false</PublishAot>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- Audit direct deps only: transitive vulnerabilities (e.g. Avalonia's Tmds.DBus.Protocol)
-         are outside our control and surfacing them as errors blocks CI on unowned code. -->
+         or SDK-injected tool packages (e.g. ILCompiler) are outside our control and surfacing
+         them as errors blocks builds. -->
     <NuGetAuditMode>direct</NuGetAuditMode>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Disable CET shadow stacks so executables run on unpatched Windows 10 LTSC 2021 -->
+    <CETCompat>false</CETCompat>
   </PropertyGroup>
 </Project>

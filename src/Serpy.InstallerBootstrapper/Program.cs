@@ -82,11 +82,11 @@ using SafePipeHandle rawHandle = NativePipe.CreateDaclRestricted(pipeName, claim
 await using var server = new NamedPipeServerStream(
     PipeDirection.InOut, isAsync: true, isConnected: false, rawHandle);
 
-using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+using var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
 try
 {
-    await server.WaitForConnectionAsync(cts.Token);
+    await server.WaitForConnectionAsync(connectCts.Token);
 }
 catch (OperationCanceledException)
 {
@@ -101,7 +101,18 @@ catch (OperationCanceledException)
 // before ImpersonateNamedPipeClient can succeed (NamedPipeServerStream.RunAsClient
 // throws "Unable to impersonate ... until data has been read" otherwise) --
 // reading is plain I/O and does not itself require impersonation.
-var helloLine = await ReadLineAsync(server, cts.Token);
+string helloLine;
+try
+{
+    helloLine = await ReadLineAsync(server, connectCts.Token);
+}
+catch (Exception ex) when (ex is OperationCanceledException or IOException)
+{
+    await Console.Error.WriteLineAsync(
+        $"Failed to read hello message from client within timeout: {ex.Message}");
+    return ExitPipeFailure;
+}
+
 BootstrapClientHello hello;
 try
 {
@@ -110,7 +121,7 @@ try
 }
 catch (JsonException ex)
 {
-    await WriteFailureResultAsync(server, $"Malformed hello message: {ex.Message}", cts.Token);
+    await WriteFailureResultAsync(server, $"Malformed hello message: {ex.Message}");
     return ExitAuthFailed;
 }
 
@@ -131,13 +142,13 @@ if (authenticatedSid is null || !authenticatedSid.Equals(claimedSid))
 {
     await WriteFailureResultAsync(server,
         "Authenticated client SID does not match the claimed SID. " +
-        "Refusing to proceed.", cts.Token);
+        "Refusing to proceed.");
     return ExitAuthFailed;
 }
 
 if (!BootstrapProtocol.NoncesMatch(expectedNonce, hello.Nonce))
 {
-    await WriteFailureResultAsync(server, "Nonce mismatch. Refusing to proceed.", cts.Token);
+    await WriteFailureResultAsync(server, "Nonce mismatch. Refusing to proceed.");
     return ExitAuthFailed;
 }
 
@@ -145,10 +156,9 @@ if (!string.Equals(hello.InstallerPath, installerPath, StringComparison.OrdinalI
 {
     await WriteFailureResultAsync(server,
         "Installer path in the authenticated hello does not match the launch argument. " +
-        "Refusing to proceed.", cts.Token);
+        "Refusing to proceed.");
     return ExitAuthFailed;
 }
-
 // ── Verify the runtime descriptor (IR3/IKTD3) ───────────────────────────────
 // The signed descriptor ships as an admin-protected sibling file next to
 // this executable -- the same MSI-install/tamper protection the helper
@@ -167,10 +177,9 @@ try
 catch (Exception ex) when (ex is IOException or InvalidOperationException or JsonException or FormatException)
 {
     await WriteFailureResultAsync(server,
-        $"Could not load or verify the signed runtime descriptor: {ex.Message}", cts.Token);
+        $"Could not load or verify the signed runtime descriptor: {ex.Message}");
     return ExitDescriptorInvalid;
 }
-
 // ── Copy to an admin-only intermediate, then re-verify at THAT path (IR3) ──
 // TOCTOU protection: re-hashing installerPath itself would still trust
 // whatever bytes happen to be there at re-verify time, which a non-admin
@@ -192,17 +201,28 @@ try
     {
         await WriteFailureResultAsync(server,
             $"Installer SHA-256 mismatch at the protected re-verification path. " +
-            $"Expected {descriptor.InstallerSha256}, got {actualSha256}. Refusing to launch.", cts.Token);
+            $"Expected {descriptor.InstallerSha256}, got {actualSha256}. Refusing to launch.");
         return ExitShaMismatch;
     }
+
+    using var installCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
     int? dismExitCode = null;
     if (hello.EnableWindowsFeatures)
     {
-        dismExitCode = await DismRunner.RunAsync(cts.Token);
+        try
+        {
+            dismExitCode = await DismRunner.RunAsync(installCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            await WriteFailureResultAsync(server, "DISM feature enablement timed out.", dismExitCode: dismExitCode);
+            return ExitVendorLaunchFailed;
+        }
+
         if (dismExitCode != 0 && dismExitCode != 3010)
         {
-            await WriteFailureResultAsync(server, $"DISM failed with exit code {dismExitCode}.", cts.Token, dismExitCode);
+            await WriteFailureResultAsync(server, $"DISM failed with exit code {dismExitCode}.", dismExitCode: dismExitCode);
             return ExitVendorLaunchFailed;
         }
     }
@@ -226,43 +246,43 @@ try
     // permissions, so no privilege escalation is possible even if the
     // user's own tree is later booby-trapped at that final, unelevated step.
     stagingDir = StagingHardening.CreateAdminOnlyDirectory();
-    var psi = new ProcessStartInfo(adminIntermediatePath)
+    int vendorExitCode;
+    try
     {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        // NSIS requires /D to be the final argument and UNQUOTED even if the
-        // path contains spaces -- ArgumentList auto-quotes on spaces, so the
-        // raw Arguments string is built by hand instead.
-        Arguments = $"/S /D={stagingDir}",
-    };
-    using var vendorProcess = Process.Start(psi)
-        ?? throw new InvalidOperationException("Vendor installer process failed to start.");
-    await vendorProcess.WaitForExitAsync(cts.Token);
+        vendorExitCode = await VendorInstallerRunner.RunAsync(adminIntermediatePath, stagingDir, installCts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        await WriteFailureResultAsync(server, "Vendor installer process timed out.");
+        return ExitVendorLaunchFailed;
+    }
+    catch (Exception ex)
+    {
+        await WriteFailureResultAsync(server, $"Vendor installer process failed to run: {ex.Message}");
+        return ExitVendorLaunchFailed;
+    }
 
-    if (vendorProcess.ExitCode != 0)
+    if (vendorExitCode != 0)
     {
         await WriteFailureResultAsync(server,
-            $"Vendor installer exited with code {vendorProcess.ExitCode}.", cts.Token);
+            $"Vendor installer exited with code {vendorExitCode}.");
         return ExitVendorLaunchFailed;
     }
 
     if (!Directory.Exists(stagingDir))
     {
         await WriteFailureResultAsync(server,
-            "Vendor installer exited zero but produced no staging directory.", cts.Token);
+            "Vendor installer exited zero but produced no staging directory.");
         return ExitVendorLaunchFailed;
     }
-
     // ── Validate no reparse points, then ACL-harden the staging tree (IR3) ─
     if (StagingHardening.ContainsReparsePoint(stagingDir, out var reparsePointPath))
     {
         await WriteFailureResultAsync(server,
             $"Staging tree contains a reparse point at '{reparsePointPath}'; refusing to hand off " +
-            "an installed tree that could redirect elsewhere once ownership transfers.",
-            cts.Token);
+            "an installed tree that could redirect elsewhere once ownership transfers.");
         return ExitReparsePointDetected;
     }
-
     // ── Two-phase handoff (IR3): read-only staged result first ─────────────
     // Granting write access immediately would let anything running under
     // the requesting user's own SID (not just this legitimate resolver
@@ -274,8 +294,7 @@ try
     StagingHardening.GrantReadOnlyAccess(stagingDir, claimedSid);
 
     var stagedResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null, DismExitCode: dismExitCode);
-    await WriteResultAsync(server, stagedResult, cts.Token);
-
+    await WriteResultAsync(server, stagedResult);
     // The caller's own validation (ValidateContents/-version/TLS probe)
     // spawns real subprocesses and can take longer than the connection's
     // original budget -- a separate, more generous timeout governs waiting
@@ -299,31 +318,33 @@ try
     }
     catch (JsonException)
     {
-        await WriteFailureResultAsync(server, "Malformed finalize message. Refusing to proceed.", cts.Token);
+        await WriteFailureResultAsync(server, "Malformed finalize message. Refusing to proceed.");
         return ExitAuthFailed;
     }
-
     if (!BootstrapProtocol.NoncesMatch(expectedNonce, finalize.Nonce))
     {
         await WriteFailureResultAsync(server,
-            "Finalize message nonce does not match the authenticated session. Refusing to proceed.", cts.Token);
+            "Finalize message nonce does not match the authenticated session. Refusing to proceed.");
         return ExitAuthFailed;
     }
-
     if (!finalize.Approve)
     {
         await WriteFailureResultAsync(server,
-            "Caller reported validation failure; staging tree discarded without granting write access.", cts.Token);
+            "Caller reported validation failure; staging tree discarded without granting write access.");
         return ExitVendorLaunchFailed;
     }
-
     // Only now, after an authenticated approval, does ownership transfer.
     StagingHardening.HardenOwnership(stagingDir, claimedSid);
 
     succeeded = true;
     var finalResult = new BootstrapWireResult(ExitCode: 0, StagingDir: stagingDir, ErrorMessage: null, DismExitCode: dismExitCode);
-    await WriteResultAsync(server, finalResult, cts.Token);
+    await WriteResultAsync(server, finalResult);
     return dismExitCode == 3010 ? 3010 : 0;
+}
+catch (Exception ex) when (ex is not OperationCanceledException)
+{
+    await WriteFailureResultAsync(server, $"Elevated install failed unexpectedly: {ex.Message}");
+    return ExitVendorLaunchFailed;
 }
 finally
 {
@@ -380,10 +401,10 @@ static async Task<string> ReadLineAsync(Stream stream, CancellationToken ct)
     return Encoding.UTF8.GetString(buffer.ToArray());
 }
 
-static Task WriteFailureResultAsync(Stream stream, string errorMessage, CancellationToken ct, int? dismExitCode = null) =>
+static Task WriteFailureResultAsync(Stream stream, string errorMessage, CancellationToken ct = default, int? dismExitCode = null) =>
     WriteResultAsync(stream, new BootstrapWireResult(ExitCode: 1, StagingDir: null, ErrorMessage: errorMessage, DismExitCode: dismExitCode), ct);
 
-static async Task WriteResultAsync(Stream stream, BootstrapWireResult result, CancellationToken ct)
+static async Task WriteResultAsync(Stream stream, BootstrapWireResult result, CancellationToken ct = default)
 {
     // Writing a short JSON line back over an already-connected pipe should
     // always be fast regardless of how long an earlier READ waited (e.g.
@@ -788,5 +809,52 @@ internal static class DismRunner
             ?? throw new InvalidOperationException("Failed to start DISM.");
         await proc.WaitForExitAsync(ct);
         return proc.ExitCode;
+    }
+}
+
+internal static class VendorInstallerRunner
+{
+    internal static Func<string, string, CancellationToken, Task<int>>? TestExecutor { get; set; }
+
+    public static async Task<int> RunAsync(string installerPath, string stagingDir, CancellationToken ct)
+    {
+        if (TestExecutor is not null)
+        {
+            return await TestExecutor(installerPath, stagingDir, ct);
+        }
+
+        var psi = new ProcessStartInfo(installerPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            // NSIS requires /D to be the final argument and UNQUOTED even if the
+            // path contains spaces -- ArgumentList auto-quotes on spaces, so the
+            // raw Arguments string is built by hand instead.
+            Arguments = $"/S /D={stagingDir}",
+        };
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException("Vendor installer process failed to start.");
+
+        try
+        {
+            await proc.WaitForExitAsync(ct);
+            return proc.ExitCode;
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!proc.HasExited)
+                {
+                    proc.Kill(entireProcessTree: true);
+                }
+            }
+            catch (Exception)
+            {
+                // Best-effort process kill on timeout/cancellation
+            }
+            throw;
+        }
     }
 }

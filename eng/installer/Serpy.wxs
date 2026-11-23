@@ -24,7 +24,23 @@
            Version="$(var.ProductVersion)"
            UpgradeCode="96d90a65-ce76-4481-8b22-122735a4bf54"
            Scope="perMachine">
-
+    <!--
+      True when some Microsoft.NETCore.App x64 runtime is already present
+      (HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.NETCore.App).
+      Any version satisfies hostfxr's default roll-forward for a net10.0
+      framework-dependent helper, so the pinned runtime .exe is only run when
+      no runtime exists at all (KD_MSI1).
+    -->
+    <Property Id="DOTNETCOREAPPPRESENT" Secure="yes">
+      <RegistrySearch Id="DotNetCoreAppSharedFxSearch"
+                      Root="HKLM"
+                      Type="raw"
+                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.NETCore.App" />
+    </Property>
+    <?ifdef DotNetRuntimeDir ?>
+    <!-- Marker confirming the harvested runtime payload was compiled in. -->
+    <Property Id="DOTNETRUNTIMEPAYLOAD" Value="1" Hidden="yes" />
+    <?endif?>
     <SummaryInformation Description="Serpy -- headless Debian/ERPNext appliance host" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Serpy is already installed." />
     <MediaTemplate EmbedCab="yes" />
@@ -47,10 +63,39 @@
         </Control>
       </Dialog>
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="NOT Installed" />
-      <InstallUISequence>
-        <Show Dialog="SerpyInstallDlg" Before="ProgressDlg" Condition="NOT Installed" />
-      </InstallUISequence>
     </UI>
+    <!--
+      .NET runtime delivery (KD_MSI1): the Serpy.InstallerBootstrapper.exe
+      helper is published framework-dependent (CI keeps self-contained=false),
+      so a clean Windows needs a runtime. The official dotnet-runtime
+      win-x64 .exe is a Burn bundle whose nested msiexec CANNOT run while
+      Serpy.msi holds the Windows Installer execution mutex (VM-verified:
+      "Failed to grab execution mutex", 1618 three times, bundle exit 0x652,
+      WixQuietExec64 error, 1603 rollback) — so NOTHING is executed at
+      install time. Instead build-msi.ps1 fetches the official ZIP
+      (same version pin, SHA-512 verified against Microsoft's published
+      value) and the extracted FILES are harvested into
+      DotNetRuntimeFiles below, under C:\Program Files\dotnet\ (the default
+      machine-wide location hostfxr resolves). The DotNetRuntimeFeature is
+      Level 0 (absent) by default and raised to Level 1 ONLY when
+      DOTNETCOREAPPPRESENT is false, so machines with any runtime skip it.
+      Every component is Permanent: uninstalling Serpy never removes the
+      shared runtime (matching the C:\Program Files\dotnet contract other
+      .NET apps rely on). The registry values below mirror what the official
+      installer writes so the machine shows the runtime installed and the
+      DOTNETCOREAPPPRESENT detection stays truthful for future Serpy
+      installs/repairs.
+    -->
+    <?ifdef DotNetRuntimeDir ?>
+    <Feature Id="DotNetRuntimeFeature" Title=".NET runtime (shared, machine-wide)" AllowAbsent="yes" Level="0">
+      <Level Value="1" Condition="NOT DOTNETCOREAPPPRESENT" />
+      <ComponentGroupRef Id="DotNetRuntimeFiles" />
+    </Feature>
+    <?endif?>
+
+    <InstallUISequence>
+      <Show Dialog="SerpyInstallDlg" Before="ProgressDlg" Condition="NOT Installed" />
+    </InstallUISequence>
     <Property Id="WixShellExecTarget" Value="[#SerpyAppExe]" />
     <CustomAction Id="LaunchApplication" BinaryRef="Wix4UtilCA_X86" DllEntry="WixShellExec" Impersonate="yes" />
     <Feature Id="MainFeature" Title="Serpy" Level="1">
@@ -111,11 +156,15 @@
   -->
   <Fragment>
     <ComponentGroup Id="BootstrapperFiles" Directory="BOOTSTRAPPERFOLDER">
-      <Files Include="$(var.BootstrapperPublishDir)\**" />
       <?ifdef DescriptorPath?>
+      <Files Include="$(var.BootstrapperPublishDir)\**">
+        <Exclude Files="$(var.BootstrapperPublishDir)\runtime-descriptor.signed.json" />
+      </Files>
       <Component Id="SignedDescriptorComponent">
         <File Id="SignedDescriptorFile" Source="$(var.DescriptorPath)" Name="runtime-descriptor.signed.json" KeyPath="yes" />
       </Component>
+      <?else?>
+      <Files Include="$(var.BootstrapperPublishDir)\**" />
       <?endif?>
     </ComponentGroup>
   </Fragment>

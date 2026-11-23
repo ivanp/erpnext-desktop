@@ -16,14 +16,17 @@ Two-disk model:
 Guided setup (PC check, one Windows permission prompt, parallel cached downloads, offline build, company data, start), tray states, notifications and the one-click MSI are implemented and covered by deterministic tests. The offline guest build under `restrict=on` completed and passed all 6 version gates (verified in 3.5 minutes from local cache). A complete clean install through the MSI, the second-run-downloads-nothing check, and the observed first-time user run are pending the opt-in acceptance run recorded in `docs/results.md`. Serpy uses the user-approved, SHA-256-verified per-user QEMU installer; it installs into `%LOCALAPPDATA%\Serpy\runtime` without requiring QEMU on PATH. See `docs/plans/2026-11-20-2151-feat-easy-install-experience-plan.md` and `docs/results.md` for exact evidence.
 
 - Managed QEMU/WHPX mTLS QMP smoke: **VERIFIED only for the previously installed local bundle**; the per-user installer delivery path awaits a clean delivery-chain run.
-- Deterministic tests (2026-11-22): `Serpy.Core.Tests` 509 pass, `Serpy.App.Tests` 165 pass, `Serpy.InstallerBootstrapper.Tests` 20 pass.
+- Deterministic tests (2026-11-22): `Serpy.Core.Tests` 531 pass, `Serpy.App.Tests` 175 pass, `Serpy.InstallerBootstrapper.Tests` 25 pass.
 - Linux x64 and macOS x64 are compile/publish-checked extension targets, not runtime-delivered platforms.
 
 ## Prerequisites (Windows)
 
-- Windows 10 22H2 / Windows 11 x64
+- Windows 10 (21H2 / build 19044 or newer, including Enterprise LTSC 2021) / Windows 11 x64
 - **Windows Hypervisor Platform** feature enabled (Settings → Turn Windows features on or off → Windows Hypervisor Platform → reboot)
 - No QEMU on PATH required — Serpy downloads, SHA-verifies, and silently installs the configured QEMU installer into `%LOCALAPPDATA%\Serpy\runtime` for the current user.
+- No .NET install needed — the MSI includes the official .NET runtime files and
+  deploys them when Windows has none (uninstalling Serpy never removes the
+  shared runtime).
 
 ## Build & test
 

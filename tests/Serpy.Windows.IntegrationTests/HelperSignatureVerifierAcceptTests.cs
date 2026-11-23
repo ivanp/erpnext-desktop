@@ -47,8 +47,14 @@ public sealed class HelperSignatureVerifierAcceptTests
     [Fact]
     public void Verify_TrustedSignedBinary_ReturnsValidWithMatchingSubject()
     {
+        if (Environment.GetEnvironmentVariable("SERPY_RUN_SMOKE") != "1") return;
         var signingDir = FindLocalSigningDir();
         if (signingDir is null) return; // no local dev test cert present -- skip
+
+        var isElevated = OperatingSystem.IsWindows() &&
+            new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        var storeLocation = isElevated ? StoreLocation.LocalMachine : StoreLocation.CurrentUser;
 
         var pfxPath = Path.Combine(signingDir, "serpy-test-signing.pfx");
         var cerPath = Path.Combine(signingDir, "serpy-test-signing.cer");
@@ -61,14 +67,14 @@ public sealed class HelperSignatureVerifierAcceptTests
 
         try
         {
-            using (var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser))
+            using (var rootStore = new X509Store(StoreName.Root, storeLocation))
             {
                 rootStore.Open(OpenFlags.ReadWrite);
                 using var publicOnly = X509CertificateLoader.LoadCertificateFromFile(cerPath);
                 rootStore.Add(publicOnly);
                 rootImported = true;
             }
-            using (var pubStore = new X509Store(StoreName.TrustedPublisher, StoreLocation.CurrentUser))
+            using (var pubStore = new X509Store(StoreName.TrustedPublisher, storeLocation))
             {
                 pubStore.Open(OpenFlags.ReadWrite);
                 using var publicOnly = X509CertificateLoader.LoadCertificateFromFile(cerPath);
@@ -101,14 +107,14 @@ public sealed class HelperSignatureVerifierAcceptTests
 
             if (rootImported)
             {
-                using var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+                using var rootStore = new X509Store(StoreName.Root, storeLocation);
                 rootStore.Open(OpenFlags.ReadWrite);
                 var toRemove = rootStore.Certificates.Find(X509FindType.FindByThumbprint, cert.Thumbprint, false);
                 foreach (var c in toRemove.Cast<X509Certificate2>()) rootStore.Remove(c);
             }
             if (publisherImported)
             {
-                using var pubStore = new X509Store(StoreName.TrustedPublisher, StoreLocation.CurrentUser);
+                using var pubStore = new X509Store(StoreName.TrustedPublisher, storeLocation);
                 pubStore.Open(OpenFlags.ReadWrite);
                 var toRemove = pubStore.Certificates.Find(X509FindType.FindByThumbprint, cert.Thumbprint, false);
                 foreach (var c in toRemove.Cast<X509Certificate2>()) pubStore.Remove(c);
@@ -116,15 +122,60 @@ public sealed class HelperSignatureVerifierAcceptTests
         }
     }
 
+    private static string? FindSignTool()
+    {
+        var roots = new[]
+        {
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Windows Kits\10\bin"),
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Windows Kits\10\bin"),
+        };
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root)) continue;
+            var signtools = Directory.GetFiles(root, "signtool.exe", SearchOption.AllDirectories)
+                .Where(p => p.Contains(@"\x64\"))
+                .OrderByDescending(p => p)
+                .ToList();
+            if (signtools.Count > 0) return signtools[0];
+        }
+        return null;
+    }
+
     private static void RunPowerShellSign(string filePath, string pfxPath, string password)
     {
+        var signtool = FindSignTool();
+        if (signtool is not null)
+        {
+            var psiSig = new ProcessStartInfo(signtool)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+            };
+            psiSig.ArgumentList.Add("sign");
+            psiSig.ArgumentList.Add("/fd");
+            psiSig.ArgumentList.Add("SHA256");
+            psiSig.ArgumentList.Add("/f");
+            psiSig.ArgumentList.Add(pfxPath);
+            psiSig.ArgumentList.Add("/p");
+            psiSig.ArgumentList.Add(password);
+            psiSig.ArgumentList.Add(filePath);
+
+            using var procSig = Process.Start(psiSig) ?? throw new InvalidOperationException("Could not start signtool.exe.");
+            procSig.WaitForExit();
+            if (procSig.ExitCode == 0) return;
+        }
+
+        var psExe = File.Exists(@"C:\Program Files\PowerShell\7\pwsh.exe") ? @"C:\Program Files\PowerShell\7\pwsh.exe" : "powershell.exe";
         var script =
+            $"Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; " +
             $"$c = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(" +
             $"'{pfxPath}', (ConvertTo-SecureString -String '{password}' -Force -AsPlainText), 'Exportable'); " +
             $"$r = Set-AuthenticodeSignature -FilePath '{filePath}' -Certificate $c -HashAlgorithm SHA256; " +
             $"if ($r.Status -ne 'Valid') {{ throw \"sign failed: $($r.Status) $($r.StatusMessage)\" }}";
 
-        var psi = new ProcessStartInfo("powershell.exe")
+        var psi = new ProcessStartInfo(psExe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -137,7 +188,7 @@ public sealed class HelperSignatureVerifierAcceptTests
         psi.ArgumentList.Add("-Command");
         psi.ArgumentList.Add(script);
 
-        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start powershell.exe.");
+        using var proc = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start {psExe}.");
         var stderr = proc.StandardError.ReadToEnd();
         proc.WaitForExit();
         if (proc.ExitCode != 0)

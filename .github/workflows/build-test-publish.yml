@@ -94,7 +94,17 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           wix extension add WixToolset.Util.wixext/5.0.2
+          wix extension add WixToolset.UI.wixext/5.0.2
 
+      - name: Download pinned .NET runtime zip for MSI embedding (KD_MSI1)
+        # The MSI job gets the official dotnet-runtime win-x64 .zip into the
+        # build; build-msi.ps1 re-verifies its SHA-512 against the pin in its
+        # own defaults before harvesting. The helper STAYS framework-dependent.
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/dotnet-runtime | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.15/dotnet-runtime-10.0.15-win-x64.zip" `
+            -OutFile "dist/dotnet-runtime/dotnet-runtime-10.0.15-win-x64.zip"
       - name: Build Serpy MSI
         # No production descriptor-signing key or Authenticode certificate is
         # provisioned in this repo's CI yet (IR7/IU3's signing pipeline is a
@@ -109,6 +119,7 @@ jobs:
             -BootstrapperPublishDir publish/bootstrapper-win-x64 `
             -OutputPath dist/Serpy.msi `
             -Version "0.0.0" `
+            -DotNetRuntimeZipPath "dist/dotnet-runtime/dotnet-runtime-10.0.15-win-x64.zip" `
             -AllowMissingDescriptor
 
       - name: Upload Windows MSI (unsigned dev build -- not a release artifact)
